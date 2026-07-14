@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity DataCleaner - AI-Powered Chat & Analytics</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Styling -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation & History -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <div class="logo-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                <div class="logo-text">
+                    <h1>Antigravity</h1>
+                    <span>DataCleaner Pro</span>
+                </div>
+            </div>
+
+            <!-- New Session Button -->
+            <button class="btn btn-primary new-session-btn" id="new-analysis-btn">
+                <i class="fa-solid fa-plus"></i> New Analysis
+            </button>
+            
+            <!-- History section -->
+            <div class="history-section">
+                <h3><i class="fa-solid fa-clock-rotate-left"></i> History</h3>
+                <div class="sessions-list" id="sessions-list">
+                    <!-- Session history items populated dynamically -->
+                    <div class="no-history">No past analyses</div>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <button class="settings-btn" id="open-settings-btn">
+                    <i class="fa-solid fa-gear"></i> Nvidia API Key
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content Workspace -->
+        <main class="workspace">
+            <!-- Header bar -->
+            <header class="workspace-header">
+                <div class="header-title">
+                    <h2 id="workspace-title">Data Upload & Objective</h2>
+                    <p id="workspace-subtitle">Provide your raw dataset file and state what model you plan to train.</p>
+                </div>
+                
+                <div class="api-key-status" id="api-status">
+                    <span class="status-indicator warning"></span>
+                    <span class="status-text">Default Key Active</span>
+                </div>
+            </header>
+
+            <div class="content-area">
+                <!-- STEP 1: UPLOAD AND INITIAL GOAL (Full screen at start) -->
+                <section class="step-section active" id="section-step-1">
+                    <div class="glass-card upload-card">
+                        <div class="drop-zone" id="file-drop-zone">
+                            <input type="file" id="file-input" accept=".xlsx, .xls, .csv" class="hidden">
+                            <div class="drop-zone-content">
+                                <i class="fa-solid fa-file-excel file-icon"></i>
+                                <h3>Drag & drop your Excel/CSV here</h3>
+                                <p>Supports .xlsx, .xls and .csv (Max 16MB)</p>
+                                <button class="btn btn-secondary select-file-btn">Choose File</button>
+                            </div>
+                        </div>
+                        
+                        <div class="uploaded-file-details hidden" id="file-details-container">
+                            <div class="file-info-header">
+                                <div class="file-meta">
+                                    <i class="fa-solid fa-file-circle-check info-icon"></i>
+                                    <div>
+                                        <h4 id="detail-filename">filename.xlsx</h4>
+                                        <p id="detail-filesize">0 rows x 0 columns</p>
+                                    </div>
+                                </div>
+                                <button class="btn-icon delete-file-btn" id="remove-file-btn">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="sheet-selector-container hidden" id="sheet-select-wrapper">
+                                <label for="sheet-select">Select Sheet to Process:</label>
+                                <select id="sheet-select" class="form-select"></select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="glass-card goal-card">
+                        <h3><i class="fa-solid fa-bullseye icon-prefix"></i> What is your Machine Learning or Analysis goal?</h3>
+                        <p class="subtitle">AI will parse your schema and remove irrelevant data to perfectly align with this goal.</p>
+                        
+                        <div class="goal-input-wrapper">
+                            <textarea id="goal-input" placeholder="Example: I want to build a model to predict customer churn based on their payment history, service issues, and demographic data."></textarea>
+                        </div>
+                        
+                        <div class="presets-container">
+                            <span class="preset-label">Suggested Goals:</span>
+                            <button class="preset-btn" data-goal="Predict house price based on area, bedrooms, and location.">House Price Prediction</button>
+                            <button class="preset-btn" data-goal="Classify if an email is spam or normal ham communication.">Spam Email Classifier</button>
+                            <button class="preset-btn" data-goal="Segment customers based on yearly spending and purchase frequency.">Customer Segmentation</button>
+                        </div>
+                    </div>
+
+                    <div class="action-footer">
+                        <button class="btn btn-primary" id="analyze-data-btn" disabled>
+                            Start AI Analysis <i class="fa-solid fa-arrow-right icon-suffix"></i>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- STEP 2 & 3: SPLIT-SCREEN CHAT & DATA DASHBOARD -->
+                <section class="step-section" id="section-split-dashboard">
+                    <div class="split-layout">
+                        <!-- Left Panel: Conversational AI Chat -->
+                        <div class="chat-panel glass-card">
+                            <div class="chat-header">
+                                <h3><i class="fa-solid fa-comments"></i> AI Data Assistant</h3>
+                                <span class="badge" id="chat-session-badge">Session Active</span>
+                            </div>
+                            
+                            <!-- Messages scrollable area -->
+                            <div class="chat-messages" id="chat-messages">
+                                <!-- Populated dynamically -->
+                            </div>
+                            
+                            <!-- Suggested chips -->
+                            <div class="chat-suggestions-wrapper">
+                                <div class="chat-suggestions" id="chat-suggestions">
+                                    <button class="suggestion-chip" data-text="Explain why column Age is kept">Why is Age kept?</button>
+                                    <button class="suggestion-chip" data-text="Also drop columns containing names">Drop name columns</button>
+                                    <button class="suggestion-chip" data-text="Generate PDF Report">Generate PDF Report</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Chat Input bar -->
+                            <div class="chat-input-wrapper">
+                                <textarea id="chat-input" placeholder="Type a message (e.g. 'Drop Age', 'Make report')..." rows="1"></textarea>
+                                <button class="btn-icon send-msg-btn" id="chat-send-btn">
+                                    <i class="fa-solid fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Workspace Tabs -->
+                        <div class="workspace-panel">
+                            <!-- Tabs Bar -->
+                            <div class="tabs-bar">
+                                <button class="tab-btn active" data-tab="tab-schema">
+                                    <i class="fa-solid fa-gears"></i> Schema Actions
+                                </button>
+                                <button class="tab-btn" data-tab="tab-preview" id="tab-btn-preview" disabled>
+                                    <i class="fa-solid fa-table"></i> Data Preview
+                                </button>
+                                <button class="tab-btn" data-tab="tab-viz" id="tab-btn-viz" disabled>
+                                    <i class="fa-solid fa-chart-pie"></i> Visualizations
+                                </button>
+                                <button class="tab-btn" data-tab="tab-export" id="tab-btn-export" disabled>
+                                    <i class="fa-solid fa-file-export"></i> Export Report
+                                </button>
+                            </div>
+                            
+                            <!-- Tab Content area -->
+                            <div class="tab-content-area">
+                                <!-- TAB 1: Schema Editor -->
+                                <div class="tab-pane active" id="tab-schema">
+                                    <div class="pane-header">
+                                        <div class="rec-summary-stats">
+                                            <div class="stat-badge"><span class="badge-num" id="rec-total-cols">0</span><span class="badge-label">Total</span></div>
+                                            <div class="stat-badge keep-badge"><span class="badge-num" id="rec-keep-cols">0</span><span class="badge-label">Keep</span></div>
+                                            <div class="stat-badge drop-badge"><span class="badge-num" id="rec-drop-cols">0</span><span class="badge-label">Drop</span></div>
+                                            <div class="stat-badge transform-badge"><span class="badge-num" id="rec-transform-cols">0</span><span class="badge-label">Trans</span></div>
+                                        </div>
+                                        <button class="btn btn-primary" id="process-data-btn">
+                                            Clean & Process Data <i class="fa-solid fa-circle-check icon-suffix"></i>
+                                        </button>
+                                    </div>
+                                    <div class="grid-columns" id="columns-recommendation-grid">
+                                        <!-- Column cards populated dynamically -->
+                                    </div>
+                                </div>
+                                
+                                <!-- TAB 2: Clean Preview -->
+                                <div class="tab-pane" id="tab-preview">
+                                    <div class="table-scroll-container">
+                                        <table class="preview-table" id="cleaned-preview-table">
+                                            <thead></thead>
+                                            <tbody></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                
+                                <!-- TAB 3: Charts -->
+                                <div class="tab-pane" id="tab-viz">
+                                    <div class="charts-grid" id="dashboard-charts-grid">
+                                        <!-- Dynamic canvas items -->
+                                    </div>
+                                </div>
+                                
+                                <!-- TAB 4: Export Center -->
+                                <div class="tab-pane" id="tab-export">
+                                    <div class="export-cards-wrapper">
+                                        <!-- Clean Excel Card -->
+                                        <div class="glass-card export-card">
+                                            <i class="fa-solid fa-file-excel export-icon excel"></i>
+                                            <h3>Cleaned Excel Dataset</h3>
+                                            <p>Download the fully cleaned and imputed dataset in Excel format.</p>
+                                            <a href="#" class="btn btn-primary download-file-link" id="download-btn" target="_blank">
+                                                <i class="fa-solid fa-download"></i> Download Excel
+                                            </a>
+                                        </div>
+                                        
+                                        <!-- Clean PDF Card -->
+                                        <div class="glass-card export-card">
+                                            <i class="fa-solid fa-file-pdf export-icon pdf"></i>
+                                            <h3>Professional Diagnostics Report</h3>
+                                            <p>Generate a professional analytics report in PDF format styled using the <b>Lora</b> font, including tables and Matplotlib diagnostic figures.</p>
+                                            <button class="btn btn-emerald" id="generate-pdf-btn">
+                                                <i class="fa-solid fa-gears"></i> Compile PDF Report
+                                            </button>
+                                            <a href="#" class="btn btn-secondary hidden" id="download-pdf-link" target="_blank">
+                                                <i class="fa-solid fa-download"></i> Get PDF Report
+                                            </a>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="stats-box glass-card" id="process-stats-box">
+                                        <h4>Applied Operations Summary</h4>
+                                        <div class="stats-flex">
+                                            <div>
+                                                <span>Rows:</span> <b id="stat-final-rows">0</b> <small id="stat-initial-rows"></small>
+                                            </div>
+                                            <div>
+                                                <span>Columns:</span> <b id="stat-final-cols">0</b> <small id="stat-dropped-cols"></small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- API SETTINGS MODAL -->
+    <div class="modal-overlay hidden" id="settings-modal">
+        <div class="glass-card modal-content">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-key"></i> Settings</h3>
+                <button class="btn-icon" id="close-settings-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="settings-api-key">Nvidia API Key:</label>
+                    <p class="form-help">Enter your Nvidia API key to override the default key. Leave empty to use the pre-configured key.</p>
+                    <div class="input-password-wrapper">
+                        <input type="password" id="settings-api-key" placeholder="nvapi-...">
+                        <button class="btn-icon" id="toggle-key-visibility"><i class="fa-solid fa-eye"></i></button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancel-settings-btn">Cancel</button>
+                <button class="btn btn-primary" id="save-settings-btn">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOADING SPINNER OVERLAY -->
+    <div class="loading-overlay hidden" id="global-loader">
+        <div class="loader-content">
+            <div class="spinner">
+                <div class="double-bounce1"></div>
+                <div class="double-bounce2"></div>
+            </div>
+            <h3 id="loader-title">Analyzing data...</h3>
+            <p id="loader-subtitle">Please wait, Nvidia GLM-5.2 is examining your schema.</p>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script src="app.js"></script>
+</body>
+</html>

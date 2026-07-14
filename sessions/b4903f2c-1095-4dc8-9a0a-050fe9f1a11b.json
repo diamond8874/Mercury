@@ -1,0 +1,784 @@
+{
+  "session_id": "b4903f2c-1095-4dc8-9a0a-050fe9f1a11b",
+  "name": "alzheimers_disease_data.csv",
+  "original_filename": "alzheimers_disease_data.csv",
+  "file_id": "d4bbbb9a-19d7-45eb-bca0-8686838ebbfd.csv",
+  "file_type": "csv",
+  "sheets": [
+    "Default"
+  ],
+  "row_count": 2149,
+  "col_count": 35,
+  "columns": [
+    {
+      "name": "PatientID",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        4751,
+        4752,
+        4753
+      ]
+    },
+    {
+      "name": "Age",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        73,
+        89,
+        73
+      ]
+    },
+    {
+      "name": "Gender",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Ethnicity",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        3
+      ]
+    },
+    {
+      "name": "EducationLevel",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        2,
+        0,
+        1
+      ]
+    },
+    {
+      "name": "BMI",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        22.927749230993864,
+        26.82768119159602,
+        17.795882442817113
+      ]
+    },
+    {
+      "name": "Smoking",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "AlcoholConsumption",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        13.29721772827684,
+        4.542523817722191,
+        19.55508452555359
+      ]
+    },
+    {
+      "name": "PhysicalActivity",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        6.327112473553353,
+        7.619884540163032,
+        7.844987790974517
+      ]
+    },
+    {
+      "name": "DietQuality",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        1.3472143059081076,
+        0.5187671386507053,
+        1.826334664579784
+      ]
+    },
+    {
+      "name": "SleepQuality",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        9.025678665766115,
+        7.151292743051223,
+        9.673574157961111
+      ]
+    },
+    {
+      "name": "FamilyHistoryAlzheimers",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "name": "CardiovascularDisease",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Diabetes",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Depression",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "HeadInjury",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Hypertension",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "SystolicBP",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        142,
+        115,
+        99
+      ]
+    },
+    {
+      "name": "DiastolicBP",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        72,
+        64,
+        116
+      ]
+    },
+    {
+      "name": "CholesterolTotal",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        242.3668396963656,
+        231.16259501016503,
+        284.1818577646338
+      ]
+    },
+    {
+      "name": "CholesterolLDL",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        56.15089696091113,
+        193.4079955157258,
+        153.3227621844376
+      ]
+    },
+    {
+      "name": "CholesterolHDL",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        33.68256349839592,
+        79.02847731570753,
+        69.77229186479597
+      ]
+    },
+    {
+      "name": "CholesterolTriglycerides",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        162.18914307736603,
+        294.63090921495643,
+        83.63832413899468
+      ]
+    },
+    {
+      "name": "MMSE",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        21.46353236431666,
+        20.61326730888292,
+        7.356248624670334
+      ]
+    },
+    {
+      "name": "FunctionalAssessment",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        6.518876973217633,
+        7.118695504189474,
+        5.895077345354194
+      ]
+    },
+    {
+      "name": "MemoryComplaints",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "BehavioralProblems",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "ADL",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        1.7258834599441897,
+        2.5924241326736475,
+        7.119547742738579
+      ]
+    },
+    {
+      "name": "Confusion",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Disorientation",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "name": "PersonalityChanges",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "DifficultyCompletingTasks",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        1,
+        0,
+        1
+      ]
+    },
+    {
+      "name": "Forgetfulness",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "Diagnosis",
+      "type": "int64",
+      "null_count": 0,
+      "sample_values": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "DoctorInCharge",
+      "type": "object",
+      "null_count": 0,
+      "sample_values": [
+        "XXXConfid",
+        "XXXConfid",
+        "XXXConfid"
+      ]
+    }
+  ],
+  "preview": [
+    {
+      "PatientID": 4751,
+      "Age": 73,
+      "Gender": 0,
+      "Ethnicity": 0,
+      "EducationLevel": 2,
+      "BMI": 22.927749230993864,
+      "Smoking": 0,
+      "AlcoholConsumption": 13.29721772827684,
+      "PhysicalActivity": 6.327112473553353,
+      "DietQuality": 1.3472143059081076,
+      "SleepQuality": 9.025678665766115,
+      "FamilyHistoryAlzheimers": 0,
+      "CardiovascularDisease": 0,
+      "Diabetes": 1,
+      "Depression": 1,
+      "HeadInjury": 0,
+      "Hypertension": 0,
+      "SystolicBP": 142,
+      "DiastolicBP": 72,
+      "CholesterolTotal": 242.3668396963656,
+      "CholesterolLDL": 56.15089696091113,
+      "CholesterolHDL": 33.68256349839592,
+      "CholesterolTriglycerides": 162.18914307736603,
+      "MMSE": 21.46353236431666,
+      "FunctionalAssessment": 6.518876973217633,
+      "MemoryComplaints": 0,
+      "BehavioralProblems": 0,
+      "ADL": 1.7258834599441897,
+      "Confusion": 0,
+      "Disorientation": 0,
+      "PersonalityChanges": 0,
+      "DifficultyCompletingTasks": 1,
+      "Forgetfulness": 0,
+      "Diagnosis": 0,
+      "DoctorInCharge": "XXXConfid"
+    },
+    {
+      "PatientID": 4752,
+      "Age": 89,
+      "Gender": 0,
+      "Ethnicity": 0,
+      "EducationLevel": 0,
+      "BMI": 26.82768119159602,
+      "Smoking": 0,
+      "AlcoholConsumption": 4.542523817722191,
+      "PhysicalActivity": 7.619884540163032,
+      "DietQuality": 0.5187671386507053,
+      "SleepQuality": 7.151292743051223,
+      "FamilyHistoryAlzheimers": 0,
+      "CardiovascularDisease": 0,
+      "Diabetes": 0,
+      "Depression": 0,
+      "HeadInjury": 0,
+      "Hypertension": 0,
+      "SystolicBP": 115,
+      "DiastolicBP": 64,
+      "CholesterolTotal": 231.16259501016503,
+      "CholesterolLDL": 193.4079955157258,
+      "CholesterolHDL": 79.02847731570753,
+      "CholesterolTriglycerides": 294.63090921495643,
+      "MMSE": 20.61326730888292,
+      "FunctionalAssessment": 7.118695504189474,
+      "MemoryComplaints": 0,
+      "BehavioralProblems": 0,
+      "ADL": 2.5924241326736475,
+      "Confusion": 0,
+      "Disorientation": 0,
+      "PersonalityChanges": 0,
+      "DifficultyCompletingTasks": 0,
+      "Forgetfulness": 1,
+      "Diagnosis": 0,
+      "DoctorInCharge": "XXXConfid"
+    },
+    {
+      "PatientID": 4753,
+      "Age": 73,
+      "Gender": 0,
+      "Ethnicity": 3,
+      "EducationLevel": 1,
+      "BMI": 17.795882442817113,
+      "Smoking": 0,
+      "AlcoholConsumption": 19.55508452555359,
+      "PhysicalActivity": 7.844987790974517,
+      "DietQuality": 1.826334664579784,
+      "SleepQuality": 9.673574157961111,
+      "FamilyHistoryAlzheimers": 1,
+      "CardiovascularDisease": 0,
+      "Diabetes": 0,
+      "Depression": 0,
+      "HeadInjury": 0,
+      "Hypertension": 0,
+      "SystolicBP": 99,
+      "DiastolicBP": 116,
+      "CholesterolTotal": 284.1818577646338,
+      "CholesterolLDL": 153.3227621844376,
+      "CholesterolHDL": 69.77229186479597,
+      "CholesterolTriglycerides": 83.63832413899468,
+      "MMSE": 7.356248624670334,
+      "FunctionalAssessment": 5.895077345354194,
+      "MemoryComplaints": 0,
+      "BehavioralProblems": 0,
+      "ADL": 7.119547742738579,
+      "Confusion": 0,
+      "Disorientation": 1,
+      "PersonalityChanges": 0,
+      "DifficultyCompletingTasks": 1,
+      "Forgetfulness": 0,
+      "Diagnosis": 0,
+      "DoctorInCharge": "XXXConfid"
+    },
+    {
+      "PatientID": 4754,
+      "Age": 74,
+      "Gender": 1,
+      "Ethnicity": 0,
+      "EducationLevel": 1,
+      "BMI": 33.80081704413547,
+      "Smoking": 1,
+      "AlcoholConsumption": 12.209265546203785,
+      "PhysicalActivity": 8.428001350491492,
+      "DietQuality": 7.43560414000302,
+      "SleepQuality": 8.392553685350862,
+      "FamilyHistoryAlzheimers": 0,
+      "CardiovascularDisease": 0,
+      "Diabetes": 0,
+      "Depression": 0,
+      "HeadInjury": 0,
+      "Hypertension": 0,
+      "SystolicBP": 118,
+      "DiastolicBP": 115,
+      "CholesterolTotal": 159.58223960561193,
+      "CholesterolLDL": 65.36663683521382,
+      "CholesterolHDL": 68.45749070794797,
+      "CholesterolTriglycerides": 277.5773575001914,
+      "MMSE": 13.991127243891668,
+      "FunctionalAssessment": 8.965106303658107,
+      "MemoryComplaints": 0,
+      "BehavioralProblems": 1,
+      "ADL": 6.48122585936608,
+      "Confusion": 0,
+      "Disorientation": 0,
+      "PersonalityChanges": 0,
+      "DifficultyCompletingTasks": 0,
+      "Forgetfulness": 0,
+      "Diagnosis": 0,
+      "DoctorInCharge": "XXXConfid"
+    },
+    {
+      "PatientID": 4755,
+      "Age": 89,
+      "Gender": 0,
+      "Ethnicity": 0,
+      "EducationLevel": 0,
+      "BMI": 20.716973826446807,
+      "Smoking": 0,
+      "AlcoholConsumption": 18.45435609061961,
+      "PhysicalActivity": 6.310460689360432,
+      "DietQuality": 0.7954975089177474,
+      "SleepQuality": 5.597237677578526,
+      "FamilyHistoryAlzheimers": 0,
+      "CardiovascularDisease": 0,
+      "Diabetes": 0,
+      "Depression": 0,
+      "HeadInjury": 0,
+      "Hypertension": 0,
+      "SystolicBP": 94,
+      "DiastolicBP": 117,
+      "CholesterolTotal": 237.6021836280377,
+      "CholesterolLDL": 92.8696998816807,
+      "CholesterolHDL": 56.87430466708379,
+      "CholesterolTriglycerides": 291.1987801806695,
+      "MMSE": 13.517608895586092,
+      "FunctionalAssessment": 6.045038774287464,
+      "MemoryComplaints": 0,
+      "BehavioralProblems": 0,
+      "ADL": 0.014691221285652,
+      "Confusion": 0,
+      "Disorientation": 0,
+      "PersonalityChanges": 1,
+      "DifficultyCompletingTasks": 1,
+      "Forgetfulness": 0,
+      "Diagnosis": 0,
+      "DoctorInCharge": "XXXConfid"
+    }
+  ],
+  "goal": "analysis of the peopple age and their alcohol consumption",
+  "column_actions": {
+    "ADL": {
+      "action": "drop",
+      "reason": "Activities of Daily Living (ADL) scores are not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "Age": {
+      "action": "keep",
+      "reason": "This is a primary feature directly required for the user's goal of analyzing age against alcohol consumption.",
+      "transformation": null
+    },
+    "AlcoholConsumption": {
+      "action": "keep",
+      "reason": "This is the primary target/feature variable directly required for the user's goal.",
+      "transformation": null
+    },
+    "BMI": {
+      "action": "drop",
+      "reason": "Body Mass Index is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "BehavioralProblems": {
+      "action": "drop",
+      "reason": "Behavioral problems are not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "CardiovascularDisease": {
+      "action": "drop",
+      "reason": "Cardiovascular disease status is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "CholesterolHDL": {
+      "action": "drop",
+      "reason": "HDL cholesterol is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "CholesterolLDL": {
+      "action": "drop",
+      "reason": "LDL cholesterol is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "CholesterolTotal": {
+      "action": "drop",
+      "reason": "Total cholesterol is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "CholesterolTriglycerides": {
+      "action": "drop",
+      "reason": "Triglycerides are outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "Confusion": {
+      "action": "drop",
+      "reason": "Confusion symptoms are not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "Depression": {
+      "action": "drop",
+      "reason": "Depression status is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "Diabetes": {
+      "action": "drop",
+      "reason": "Diabetes status is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "Diagnosis": {
+      "action": "drop",
+      "reason": "The medical diagnosis (likely Alzheimer's) is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "DiastolicBP": {
+      "action": "drop",
+      "reason": "Diastolic blood pressure is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "DietQuality": {
+      "action": "drop",
+      "reason": "Diet quality is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "DifficultyCompletingTasks": {
+      "action": "drop",
+      "reason": "Difficulty completing tasks is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "Disorientation": {
+      "action": "drop",
+      "reason": "Disorientation symptoms are not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "DoctorInCharge": {
+      "action": "drop",
+      "reason": "This column contains anonymized, constant string values ('XXXConfid') providing no analytical value.",
+      "transformation": null
+    },
+    "EducationLevel": {
+      "action": "drop",
+      "reason": "Education level is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "Ethnicity": {
+      "action": "drop",
+      "reason": "Ethnicity is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "FamilyHistoryAlzheimers": {
+      "action": "drop",
+      "reason": "Family history of Alzheimer's is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "Forgetfulness": {
+      "action": "drop",
+      "reason": "Forgetfulness is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "FunctionalAssessment": {
+      "action": "drop",
+      "reason": "Functional assessment is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "Gender": {
+      "action": "drop",
+      "reason": "While gender can influence alcohol consumption, the user's specific goal focuses strictly on age. It can be dropped to narrow the scope, though it could be kept if the user decides to expand the analysis.",
+      "transformation": null
+    },
+    "HeadInjury": {
+      "action": "drop",
+      "reason": "Head injury history is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "Hypertension": {
+      "action": "drop",
+      "reason": "Hypertension status is not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "MMSE": {
+      "action": "drop",
+      "reason": "Cognitive assessment scores are not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "MemoryComplaints": {
+      "action": "drop",
+      "reason": "Memory complaints are not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "PatientID": {
+      "action": "drop",
+      "reason": "This is a unique identifier for each patient and does not provide any analytical value regarding age or alcohol consumption.",
+      "transformation": null
+    },
+    "PersonalityChanges": {
+      "action": "drop",
+      "reason": "Personality changes are not relevant to the specific goal of analyzing age and alcohol consumption.",
+      "transformation": null
+    },
+    "PhysicalActivity": {
+      "action": "drop",
+      "reason": "Physical activity is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "SleepQuality": {
+      "action": "drop",
+      "reason": "Sleep quality is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "Smoking": {
+      "action": "drop",
+      "reason": "Smoking status is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    },
+    "SystolicBP": {
+      "action": "drop",
+      "reason": "Systolic blood pressure is outside the scope of the specific goal focusing on age and alcohol consumption.",
+      "transformation": null
+    }
+  },
+  "chat_history": [
+    {
+      "role": "assistant",
+      "content": "Hi! I've loaded your dataset: `alzheimers_disease_data.csv`. What model do you plan to train, or what is your data analysis goal?"
+    },
+    {
+      "role": "user",
+      "content": "My data cleaning goal is: analysis of the peopple age and their alcohol consumption"
+    },
+    {
+      "role": "assistant",
+      "content": "Goal set: **analysis of the peopple age and their alcohol consumption**.<br>I have completed scanning the dataset. I recommend dropping 33 irrelevant features (like PatientID, Gender...) to prepare for your modeling objective. Let me know if you want to make overrides."
+    },
+    {
+      "role": "assistant",
+      "content": "Excellent! I've clean-processed the dataset. It has been reduced from **35** features to **2** signals. You can download the clean file or view the charts on the right dashboard tabs."
+    },
+    {
+      "role": "assistant",
+      "content": "I've compiled a professional PDF data diagnostics report using the **Lora** font. You can download it directly here: <br><a href='/api/sessions/b4903f2c-1095-4dc8-9a0a-050fe9f1a11b/download_pdf' class='btn btn-emerald' style='margin-top:0.5rem; padding: 0.4rem 1rem; font-size: 0.8rem;'><i class='fa-solid fa-file-pdf'></i> Download PDF Report</a>"
+    }
+  ],
+  "charts": [
+    {
+      "chart_type": "scatter",
+      "title": "Age vs. Alcohol Consumption Distribution",
+      "x_axis": "Age",
+      "y_axis": "AlcoholConsumption",
+      "description": "A scatter plot is ideal for visualizing the raw relationship between two continuous variables. It allows us to see the density of data points across different ages and identify any broad trends, clusters, or outliers in alcohol consumption as age increases."
+    },
+    {
+      "chart_type": "line",
+      "title": "Trend of Average Alcohol Consumption Across Age",
+      "x_axis": "Age",
+      "y_axis": "AlcoholConsumption",
+      "description": "A line plot effectively aggregates the continuous data to show the central tendency (mean) of alcohol consumption for each age. This smooths out individual variances and clearly highlights the overarching trend and trajectory of drinking habits throughout the lifespan."
+    },
+    {
+      "chart_type": "histogram",
+      "title": "Distribution of Alcohol Consumption",
+      "x_axis": "AlcoholConsumption",
+      "y_axis": null,
+      "description": "A histogram provides a clear view of the overall frequency distribution of alcohol consumption values across the entire population. It helps identify the most common levels of consumption, the spread of the data, and whether the distribution is skewed."
+    },
+    {
+      "chart_type": "bar",
+      "title": "Average Alcohol Consumption by Age Group",
+      "x_axis": "Age",
+      "y_axis": "AlcoholConsumption",
+      "description": "A bar plot provides a segmented, easy-to-read comparison of average alcohol consumption across discrete age values. It makes it simple to compare specific age years against one another to pinpoint which ages have the highest and lowest average intake."
+    }
+  ],
+  "cleaned_filename": "cleaned_d4bbbb9a-19d7-45eb-bca0-8686838ebbfd.xlsx",
+  "created_at": "2026-07-15T00:30:06.556862",
+  "pdf_filename": "report_b4903f2c-1095-4dc8-9a0a-050fe9f1a11b.pdf"
+}
