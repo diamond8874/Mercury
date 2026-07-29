@@ -1,11 +1,88 @@
+/**
+ * Mercury DataCleaner - client logic.
+ *
+ * Pipeline the UI drives:
+ *   1. Upload            -> the server reads + profiles the file in the background.
+ *                           The read-out card fills in live. NO model is called.
+ *   2. User states goal  -> POST /api/analyze (202) starts the AI analysis, which
+ *                           chains into cleaning and plotting.
+ *   3. Poll /status      -> profiling | profile_ready | analyzing | analyze_done
+ *                           | processing | done | error
+ *
+ * All AI settings (provider / key / model / base URL) are sent per request, so
+ * the app is not tied to any single vendor.
+ */
+
+const LLM_STORAGE_KEY = 'mercury_llm_config';
+const API_TOKEN_KEY = 'mercury_api_token';
+
+/**
+ * Every backend call goes through here so the optional deployment token
+ * (`MERCURY_API_TOKEN`) is attached consistently. With no token configured
+ * this is a plain fetch.
+ */
+function apiFetch(url, options = {}) {
+    const token = localStorage.getItem(API_TOKEN_KEY);
+    if (!token) return fetch(url, options);
+    return fetch(url, { ...options, headers: { ...(options.headers || {}), 'X-API-Key': token } });
+}
+
+/**
+ * Same token for plain <a href> downloads, which cannot carry a header.
+ * Only appended when a token is actually configured.
+ */
+function withToken(url) {
+    const token = localStorage.getItem(API_TOKEN_KEY);
+    if (!token || !url || url === '#') return url;
+    return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+}
+
 // Application State
 const appState = {
-    apiKey: localStorage.getItem('nvidia_api_key') || '',
+    llm: loadLlmConfig(),
+    providers: [],
+    serverDefault: null,
     activeSessionId: null,
     sessionData: null,
     sessionsHistory: [],
-    chartInstances: []
+    chartInstances: [],
+    schemaRendered: false
 };
+
+/** Read saved provider settings, migrating the old Nvidia-only key if present. */
+function loadLlmConfig() {
+    let config = { apiKey: '', provider: '', model: '', baseUrl: '' };
+    try {
+        const stored = JSON.parse(localStorage.getItem(LLM_STORAGE_KEY) || 'null');
+        if (stored && typeof stored === 'object') config = { ...config, ...stored };
+    } catch (err) {
+        console.warn('Could not parse stored LLM config:', err);
+    }
+    if (!config.apiKey) {
+        const legacyKey = localStorage.getItem('nvidia_api_key');
+        if (legacyKey) {
+            config.apiKey = legacyKey;
+            config.provider = config.provider || 'nvidia';
+            localStorage.removeItem('nvidia_api_key');
+            saveLlmConfig(config);
+        }
+    }
+    return config;
+}
+
+function saveLlmConfig(config) {
+    localStorage.setItem(LLM_STORAGE_KEY, JSON.stringify(config));
+}
+
+/** Connection fields merged into every request body that may reach a model. */
+function llmPayload() {
+    return {
+        api_key: appState.llm.apiKey || '',
+        provider: appState.llm.provider || '',
+        model: appState.llm.model || '',
+        base_url: appState.llm.baseUrl || ''
+    };
+}
 
 // DOM Elements
 const els = {
@@ -16,13 +93,22 @@ const els = {
     cancelSettingsBtn: document.getElementById('cancel-settings-btn'),
     saveSettingsBtn: document.getElementById('save-settings-btn'),
     settingsApiKey: document.getElementById('settings-api-key'),
+    settingsProvider: document.getElementById('settings-provider'),
+    settingsProviderHint: document.getElementById('settings-provider-hint'),
+    settingsModel: document.getElementById('settings-model'),
+    settingsModelList: document.getElementById('settings-model-list'),
+    settingsBaseUrl: document.getElementById('settings-base-url'),
+    settingsBaseUrlGroup: document.getElementById('settings-base-url-group'),
+    settingsTestResult: document.getElementById('settings-test-result'),
+    testConnectionBtn: document.getElementById('test-connection-btn'),
+    loadModelsBtn: document.getElementById('load-models-btn'),
     toggleKeyVisibility: document.getElementById('toggle-key-visibility'),
-    
+
     // Sidebar History
     sessionsList: document.getElementById('sessions-list'),
     newAnalysisBtn: document.getElementById('new-analysis-btn'),
-    
-    // Step 1: Upload & Goal
+
+    // Step 1: Upload, read-out & goal
     fileDropZone: document.getElementById('file-drop-zone'),
     fileInput: document.getElementById('file-input'),
     selectFileBtn: document.querySelector('.select-file-btn'),
@@ -35,44 +121,50 @@ const els = {
     goalInput: document.getElementById('goal-input'),
     presetBtns: document.querySelectorAll('.preset-btn'),
     analyzeDataBtn: document.getElementById('analyze-data-btn'),
-    
+
+    // Dataset read-out card
+    datasetReadout: document.getElementById('dataset-readout'),
+    readoutStatus: document.getElementById('readout-status'),
+    readoutProgressFill: document.getElementById('readout-progress-fill'),
+    readoutRows: document.getElementById('readout-rows'),
+    readoutCols: document.getElementById('readout-cols'),
+    readoutMissing: document.getElementById('readout-missing'),
+    readoutDupes: document.getElementById('readout-dupes'),
+    readoutTypes: document.getElementById('readout-types'),
+    readoutWarnings: document.getElementById('readout-warnings'),
+
     // Workspace Header
     workspaceTitle: document.getElementById('workspace-title'),
     workspaceSubtitle: document.getElementById('workspace-subtitle'),
-    
+
     // Step Sections
     sectionStep1: document.getElementById('section-step-1'),
     sectionSplitDashboard: document.getElementById('section-split-dashboard'),
-    
+
     // Left Chat Panel
     chatMessages: document.getElementById('chat-messages'),
     chatInput: document.getElementById('chat-input'),
     chatSendBtn: document.getElementById('chat-send-btn'),
-    chatSuggestions: document.getElementById('chat-suggestions'),
     chatSessionBadge: document.getElementById('chat-session-badge'),
-    
+
     // Right Workspace Tabs
     tabButtons: document.querySelectorAll('.tab-btn'),
     tabPanes: document.querySelectorAll('.tab-pane'),
     tabBtnPreview: document.getElementById('tab-btn-preview'),
     tabBtnViz: document.getElementById('tab-btn-viz'),
     tabBtnExport: document.getElementById('tab-btn-export'),
-    
+
     // Tab Content Details
     recTotalCols: document.getElementById('rec-total-cols'),
     recKeepCols: document.getElementById('rec-keep-cols'),
     recDropCols: document.getElementById('rec-drop-cols'),
     recTransformCols: document.getElementById('rec-transform-cols'),
     columnsRecommendationGrid: document.getElementById('columns-recommendation-grid'),
-    processDataBtn: document.getElementById('process-data-btn'), // null after button removal; kept for compatibility
-    
-    // Clean Preview Table
+    processDataBtn: document.getElementById('process-data-btn'),
+
     cleanedPreviewTable: document.getElementById('cleaned-preview-table'),
-    
-    // Visualizations Chart Grid
     dashboardChartsGrid: document.getElementById('dashboard-charts-grid'),
-    
-    // Export tab Elements
+
     downloadBtn: document.getElementById('download-btn'),
     generatePdfBtn: document.getElementById('generate-pdf-btn'),
     downloadPdfLink: document.getElementById('download-pdf-link'),
@@ -80,23 +172,21 @@ const els = {
     statInitialRows: document.getElementById('stat-initial-rows'),
     statFinalCols: document.getElementById('stat-final-cols'),
     statDroppedCols: document.getElementById('stat-dropped-cols'),
-    
-    // Global loader spinner
+
     globalLoader: document.getElementById('global-loader'),
     loaderTitle: document.getElementById('loader-title'),
     loaderSubtitle: document.getElementById('loader-subtitle')
 };
 
-// Colors for Chart.js
 const chartColors = {
     primary: '#6366f1',
     primaryAlpha: 'rgba(99, 102, 241, 0.15)',
     accent: '#a855f7',
     success: '#10b981',
+    danger: '#ef4444',
     palette: ['#6366f1', '#a855f7', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#14b8a6']
 };
 
-// Start application hook
 document.addEventListener('DOMContentLoaded', () => {
     updateApiStatus();
     initSettingsModal();
@@ -104,26 +194,90 @@ document.addEventListener('DOMContentLoaded', () => {
     initGoalPresets();
     initTabs();
     initChatConsole();
-    initSidebarHistory();
-    
-    // Attach buttons events
+    initSidebarDrawer();
+
     els.newAnalysisBtn.addEventListener('click', startNewAnalysis);
     els.analyzeDataBtn.addEventListener('click', runAiSchemaAnalysis);
-    els.processDataBtn.addEventListener('click', executePandasProcess);
+    els.processDataBtn.addEventListener('click', reprocessWithCurrentSchema);
     els.generatePdfBtn.addEventListener('click', compilePdfDiagnosticsReport);
+    els.apiStatus.addEventListener('click', () => els.openSettingsBtn.click());
+    els.sheetSelect.addEventListener('change', changeActiveSheet);
 
-    // Load past session history lists
+    fetchProviders();
     fetchSessionsHistory();
 });
 
-// Helper - Loader displays
+/* ------------------------------------------------------------------ *
+ * Off-canvas sidebar (mobile / tablet)
+ * ------------------------------------------------------------------ */
+
+const MOBILE_BREAKPOINT = 1024;
+
+function isMobileLayout() {
+    return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches;
+}
+
+function setSidebarOpen(open) {
+    const container = document.getElementById('app-container');
+    const toggle = document.getElementById('sidebar-toggle');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (!container) return;
+
+    container.classList.toggle('sidebar-open', open);
+    if (toggle) toggle.setAttribute('aria-expanded', String(open));
+    if (backdrop) backdrop.hidden = !open;
+    // Stop the page behind the drawer from scrolling with it.
+    document.body.style.overflow = open && isMobileLayout() ? 'hidden' : '';
+}
+
+function closeSidebarOnMobile() {
+    if (isMobileLayout()) setSidebarOpen(false);
+}
+
+function initSidebarDrawer() {
+    const toggle = document.getElementById('sidebar-toggle');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    const container = document.getElementById('app-container');
+
+    if (toggle) {
+        toggle.addEventListener('click', () =>
+            setSidebarOpen(!container.classList.contains('sidebar-open')));
+    }
+    if (backdrop) backdrop.addEventListener('click', () => setSidebarOpen(false));
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            setSidebarOpen(false);
+            els.settingsModal.classList.add('hidden');
+        }
+    });
+
+    // Returning to the desktop layout must never leave the page scroll-locked.
+    window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`)
+        .addEventListener('change', () => setSidebarOpen(false));
+}
+
+/* ------------------------------------------------------------------ *
+ * Small helpers
+ * ------------------------------------------------------------------ */
+
+/** Escape untrusted text (column names, samples) before it touches innerHTML. */
+function esc(value) {
+    return String(value === null || value === undefined ? '' : value)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+let _domIdCounter = 0;
+function nextDomId(prefix) {
+    _domIdCounter += 1;
+    return `${prefix}-${_domIdCounter}`;
+}
+
 function showLoader(title, subtitle) {
     els.loaderTitle.textContent = title;
     els.loaderSubtitle.textContent = subtitle;
-    
-    // Reset loader progress fill and step dots
     updateLoaderProgress(0, 1);
-    
     els.globalLoader.classList.remove('hidden');
 }
 
@@ -132,18 +286,13 @@ function updateLoaderProgress(percent, activeStepIndex) {
     const progressPercent = document.getElementById('loader-progress-percent');
     if (progressFill) progressFill.style.width = `${percent}%`;
     if (progressPercent) progressPercent.textContent = `${percent}%`;
-    
-    // Highlight step markers
+
     for (let i = 1; i <= 4; i++) {
         const marker = document.getElementById(`step-marker-${i}`);
         if (!marker) continue;
-        if (i < activeStepIndex) {
-            marker.className = 'progress-step-item completed';
-        } else if (i === activeStepIndex) {
-            marker.className = 'progress-step-item active';
-        } else {
-            marker.className = 'progress-step-item';
-        }
+        if (i < activeStepIndex) marker.className = 'progress-step-item completed';
+        else if (i === activeStepIndex) marker.className = 'progress-step-item active';
+        else marker.className = 'progress-step-item';
     }
 }
 
@@ -151,39 +300,155 @@ function hideLoader() {
     els.globalLoader.classList.add('hidden');
 }
 
+/* ------------------------------------------------------------------ *
+ * 1. PROVIDER / MODEL SETTINGS
+ * ------------------------------------------------------------------ */
 
-// 1. API KEY SETTINGS MANAGEMENTS
-function updateApiStatus() {
-    if (appState.apiKey) {
-        els.apiStatus.querySelector('.status-indicator').className = 'status-indicator success';
-        els.apiStatus.querySelector('.status-text').textContent = 'Custom Key Loaded';
-        els.settingsApiKey.value = appState.apiKey;
-    } else {
-        els.apiStatus.querySelector('.status-indicator').className = 'status-indicator warning';
-        els.apiStatus.querySelector('.status-text').textContent = 'Default Key Active';
-        els.settingsApiKey.value = '';
+async function fetchProviders() {
+    try {
+        const response = await apiFetch('/api/providers');
+        const data = await response.json();
+        appState.providers = data.providers || [];
+        appState.serverDefault = data.server_default || null;
+        renderProviderOptions();
+        updateApiStatus();
+    } catch (err) {
+        console.error('Could not load the provider catalog:', err);
     }
 }
 
+function renderProviderOptions() {
+    if (!els.settingsProvider) return;
+    els.settingsProvider.innerHTML = '<option value="">Auto-detect from key</option>';
+    appState.providers.forEach(provider => {
+        const option = document.createElement('option');
+        option.value = provider.id;
+        option.textContent = provider.label;
+        els.settingsProvider.appendChild(option);
+    });
+    els.settingsProvider.value = appState.llm.provider || '';
+    syncProviderHint();
+}
+
+function currentProviderMeta() {
+    const id = els.settingsProvider.value || detectProviderFromKey(els.settingsApiKey.value.trim());
+    return appState.providers.find(p => p.id === id) || null;
+}
+
+/** Mirror of the server-side prefix detection, for instant UI feedback. */
+function detectProviderFromKey(key) {
+    if (!key) return '';
+    const candidates = [];
+    appState.providers.forEach(provider => {
+        (provider.key_prefixes || []).forEach(prefix => candidates.push([prefix, provider.id]));
+    });
+    candidates.sort((a, b) => b[0].length - a[0].length);
+    const match = candidates.find(([prefix]) => key.startsWith(prefix));
+    return match ? match[1] : '';
+}
+
+function syncProviderHint() {
+    const meta = currentProviderMeta();
+    const explicit = els.settingsProvider.value;
+
+    if (meta) {
+        const detected = !explicit ? ' (auto-detected)' : '';
+        els.settingsProviderHint.textContent =
+            `${meta.label}${detected} - default model: ${meta.default_model || 'not set'}` +
+            `${meta.requires_key ? '' : ' - no API key required'}`;
+        els.settingsModel.placeholder = meta.default_model || 'Model id';
+        if (!els.settingsBaseUrl.value && meta.base_url) {
+            els.settingsBaseUrl.placeholder = meta.base_url;
+        }
+        els.settingsBaseUrlGroup.style.display =
+            (meta.id === 'custom' || !meta.base_url) ? 'block' : '';
+    } else {
+        els.settingsProviderHint.textContent =
+            'Provider not recognised from the key. Pick one, or choose "Custom" and set a base URL.';
+        els.settingsBaseUrlGroup.style.display = 'block';
+    }
+}
+
+function updateApiStatus() {
+    const indicator = els.apiStatus.querySelector('.status-indicator');
+    const text = els.apiStatus.querySelector('.status-text');
+    const { apiKey, provider, model } = appState.llm;
+
+    if (apiKey && apiKey.toUpperCase() === 'MOCK') {
+        indicator.className = 'status-indicator warning';
+        text.textContent = 'Offline rule engine (MOCK)';
+        return;
+    }
+    if (apiKey) {
+        const id = provider || detectProviderFromKey(apiKey);
+        const meta = appState.providers.find(p => p.id === id);
+        indicator.className = 'status-indicator success';
+        text.textContent = `${meta ? meta.label : (id || 'Custom provider')}${model ? ` / ${model}` : ''}`;
+        return;
+    }
+    if (appState.serverDefault && appState.serverDefault.has_key) {
+        indicator.className = 'status-indicator success';
+        text.textContent = `Server key: ${appState.serverDefault.label}`;
+        return;
+    }
+    indicator.className = 'status-indicator warning';
+    text.textContent = 'No provider configured (offline mode)';
+}
+
 function initSettingsModal() {
-    els.openSettingsBtn.addEventListener('click', () => els.settingsModal.classList.remove('hidden'));
-    
-    const closeModal = () => {
-        els.settingsModal.classList.add('hidden');
-        els.settingsApiKey.value = appState.apiKey;
+    const accessTokenInput = document.getElementById('settings-access-token');
+    const accessTokenGroup = document.getElementById('settings-access-token-group');
+
+    // Only surface the token field when this deployment actually enforces one.
+    apiFetch('/api/ready')
+        .then(r => r.json())
+        .then(info => {
+            if (!info.auth_required && !localStorage.getItem(API_TOKEN_KEY)) {
+                accessTokenGroup.style.display = 'none';
+            }
+        })
+        .catch(() => { /* /api/ready is optional; keep the field visible */ });
+
+    const openModal = () => {
+        els.settingsApiKey.value = appState.llm.apiKey || '';
+        els.settingsProvider.value = appState.llm.provider || '';
+        els.settingsModel.value = appState.llm.model || '';
+        els.settingsBaseUrl.value = appState.llm.baseUrl || '';
+        accessTokenInput.value = localStorage.getItem(API_TOKEN_KEY) || '';
+        els.settingsTestResult.classList.add('hidden');
+        syncProviderHint();
+        els.settingsModal.classList.remove('hidden');
     };
-    
+    const closeModal = () => els.settingsModal.classList.add('hidden');
+
+    els.openSettingsBtn.addEventListener('click', openModal);
     els.closeSettingsBtn.addEventListener('click', closeModal);
     els.cancelSettingsBtn.addEventListener('click', closeModal);
-    
-    els.saveSettingsBtn.addEventListener('click', () => {
-        const val = els.settingsApiKey.value.trim();
-        appState.apiKey = val;
-        localStorage.setItem('nvidia_api_key', val);
-        updateApiStatus();
-        els.settingsModal.classList.add('hidden');
+
+    els.settingsApiKey.addEventListener('input', syncProviderHint);
+    els.settingsProvider.addEventListener('change', () => {
+        const meta = currentProviderMeta();
+        if (meta && meta.base_url) els.settingsBaseUrl.value = '';
+        syncProviderHint();
     });
-    
+
+    els.saveSettingsBtn.addEventListener('click', () => {
+        appState.llm = {
+            apiKey: els.settingsApiKey.value.trim(),
+            provider: els.settingsProvider.value.trim(),
+            model: els.settingsModel.value.trim(),
+            baseUrl: els.settingsBaseUrl.value.trim()
+        };
+        saveLlmConfig(appState.llm);
+
+        const token = accessTokenInput.value.trim();
+        if (token) localStorage.setItem(API_TOKEN_KEY, token);
+        else localStorage.removeItem(API_TOKEN_KEY);
+
+        updateApiStatus();
+        closeModal();
+    });
+
     els.toggleKeyVisibility.addEventListener('click', () => {
         const type = els.settingsApiKey.getAttribute('type') === 'password' ? 'text' : 'password';
         els.settingsApiKey.setAttribute('type', type);
@@ -191,74 +456,140 @@ function initSettingsModal() {
         icon.classList.toggle('fa-eye');
         icon.classList.toggle('fa-eye-slash');
     });
+
+    els.testConnectionBtn.addEventListener('click', testLlmConnection);
+    els.loadModelsBtn.addEventListener('click', loadAvailableModels);
 }
 
-// 2. SIDEBAR SESSIONS HISTORY lifecycles
+function settingsFormPayload() {
+    return {
+        api_key: els.settingsApiKey.value.trim(),
+        provider: els.settingsProvider.value.trim(),
+        model: els.settingsModel.value.trim(),
+        base_url: els.settingsBaseUrl.value.trim()
+    };
+}
+
+function showTestResult(ok, message) {
+    els.settingsTestResult.className = `settings-test-result ${ok ? 'ok' : 'fail'}`;
+    els.settingsTestResult.innerHTML =
+        `<i class="fa-solid ${ok ? 'fa-circle-check' : 'fa-circle-exclamation'}"></i> ${esc(message)}`;
+    els.settingsTestResult.classList.remove('hidden');
+}
+
+async function testLlmConnection() {
+    els.testConnectionBtn.disabled = true;
+    els.testConnectionBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Testing...';
+    try {
+        const response = await apiFetch('/api/llm/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settingsFormPayload())
+        });
+        const data = await response.json();
+        const suffix = data.latency_ms ? ` (${data.latency_ms} ms)` : '';
+        showTestResult(!!data.ok, `${data.message || 'No response'}${suffix}`);
+    } catch (err) {
+        showTestResult(false, err.message);
+    } finally {
+        els.testConnectionBtn.disabled = false;
+        els.testConnectionBtn.innerHTML = '<i class="fa-solid fa-plug-circle-check"></i> Test connection';
+    }
+}
+
+async function loadAvailableModels() {
+    els.loadModelsBtn.disabled = true;
+    els.loadModelsBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    try {
+        const response = await apiFetch('/api/llm/models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settingsFormPayload())
+        });
+        const data = await response.json();
+        els.settingsModelList.innerHTML = '';
+        (data.models || []).forEach(model => {
+            const option = document.createElement('option');
+            option.value = model;
+            els.settingsModelList.appendChild(option);
+        });
+        if (data.models && data.models.length) {
+            showTestResult(true, `${data.models.length} model(s) available - click the model field to pick one.`);
+        } else {
+            showTestResult(false, data.error || 'This provider does not expose a model list. Type the model id manually.');
+        }
+    } catch (err) {
+        showTestResult(false, err.message);
+    } finally {
+        els.loadModelsBtn.disabled = false;
+        els.loadModelsBtn.innerHTML = '<i class="fa-solid fa-list"></i> Load';
+    }
+}
+
+/* ------------------------------------------------------------------ *
+ * 2. SESSION HISTORY
+ * ------------------------------------------------------------------ */
+
 async function fetchSessionsHistory() {
     try {
-        const response = await fetch('/api/sessions');
-        const data = await response.json();
-        appState.sessionsHistory = data;
+        const response = await apiFetch('/api/sessions');
+        appState.sessionsHistory = await response.json();
         renderSessionsList();
     } catch (err) {
-        console.error("Error fetching sessions list history:", err);
+        console.error('Error fetching session history:', err);
     }
 }
 
 function renderSessionsList() {
     const list = els.sessionsList;
     list.innerHTML = '';
-    
-    if (appState.sessionsHistory.length === 0) {
+
+    if (!appState.sessionsHistory.length) {
         list.innerHTML = '<div class="no-history">No past analyses</div>';
         return;
     }
-    
+
     appState.sessionsHistory.forEach(session => {
         const item = document.createElement('div');
         item.className = `session-item ${appState.activeSessionId === session.session_id ? 'active' : ''}`;
-        
+
         const dateStr = session.created_at ? new Date(session.created_at).toLocaleDateString() : '';
         const goalStr = session.goal || 'Goal not set';
-        
+
         item.innerHTML = `
             <div class="session-info">
-                <div class="session-name" title="${session.name}">${session.name}</div>
-                <div class="session-goal" title="${goalStr}">${dateStr} - ${goalStr}</div>
+                <div class="session-name" title="${esc(session.name)}">${esc(session.name)}</div>
+                <div class="session-goal" title="${esc(goalStr)}">${esc(dateStr)} - ${esc(goalStr)}</div>
             </div>
             <button class="delete-session-btn" title="Delete Session">
                 <i class="fa-solid fa-trash-can"></i>
             </button>
         `;
-        
-        // Select session event
+
         item.addEventListener('click', (e) => {
-            if (e.target.closest('.delete-session-btn')) return; // ignore delete clicks
+            if (e.target.closest('.delete-session-btn')) return;
             selectSession(session.session_id);
         });
-        
-        // Delete session event
+
         item.querySelector('.delete-session-btn').addEventListener('click', async (e) => {
             e.stopPropagation();
             if (confirm(`Are you sure you want to delete session "${session.name}"?`)) {
                 await deleteSession(session.session_id);
             }
         });
-        
+
         list.appendChild(item);
     });
 }
 
 async function deleteSession(sessionId) {
     try {
-        const response = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+        const response = await apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
         if (response.ok) {
-            if (appState.activeSessionId === sessionId) {
-                startNewAnalysis();
-            }
+            if (appState.activeSessionId === sessionId) startNewAnalysis();
             fetchSessionsHistory();
         } else {
-            alert("Failed to delete session");
+            alert('Failed to delete session');
         }
     } catch (err) {
         console.error(err);
@@ -266,97 +597,83 @@ async function deleteSession(sessionId) {
 }
 
 async function selectSession(sessionId) {
-    showLoader('Loading Analysis Session...', 'Fetching session variables and data previews.');
     try {
-        const response = await fetch(`/api/sessions/${sessionId}`);
+        const response = await apiFetch(`/api/sessions/${sessionId}`);
         const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Failed to load session');
-        }
-        
+        if (!response.ok) throw new Error(data.error || 'Failed to load session');
+
         appState.activeSessionId = sessionId;
         appState.sessionData = data;
-        
-        // Render panels
         renderLoadedSessionUI();
-        
-        // Highlight active list item
         renderSessionsList();
+        closeSidebarOnMobile();
+        return data;
     } catch (err) {
         console.error(err);
         alert(err.message);
-    } finally {
-        hideLoader();
+        return null;
     }
 }
 
 function startNewAnalysis() {
+    stopStatusPolling();
+    closeSidebarOnMobile();
     appState.activeSessionId = null;
     appState.sessionData = null;
-    
-    // Reset file uploads
+    appState.schemaRendered = false;
+
     els.fileInput.value = '';
     els.fileDropZone.classList.remove('hidden');
     els.fileDetailsContainer.classList.add('hidden');
     els.sheetSelectWrapper.classList.add('hidden');
-    
-    // Reset goal
+    els.datasetReadout.classList.add('hidden');
+
     els.goalInput.value = '';
     els.analyzeDataBtn.disabled = true;
-    if (els.processDataBtn) {
-        els.processDataBtn.disabled = true;
-    }
-    
-    // Re-verify list item selections
+    els.processDataBtn.disabled = true;
+
     renderSessionsList();
-    
-    // Show Upload section, hide split screen
-    els.workspaceTitle.textContent = "Data Upload & Objective";
-    els.workspaceSubtitle.textContent = "Provide your raw training Excel file and state what model you plan to train.";
-    
+
+    els.workspaceTitle.textContent = 'Data Upload & Objective';
+    els.workspaceSubtitle.textContent =
+        'Drop a dataset. Mercury reads it immediately and waits for your goal before analysing.';
+
     els.sectionStep1.classList.add('active');
     els.sectionSplitDashboard.classList.remove('active');
 }
 
-// 3. FILE DRAG & DROP AND SHEET SELECTOR
+/* ------------------------------------------------------------------ *
+ * 3. UPLOAD -> BACKGROUND READ (no AI call yet)
+ * ------------------------------------------------------------------ */
+
 function initDragAndDrop() {
     els.selectFileBtn.addEventListener('click', () => els.fileInput.click());
-    
+
     els.fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-            uploadRawDatasetFile(e.target.files[0]);
-        }
+        if (e.target.files.length) uploadRawDatasetFile(e.target.files[0]);
     });
-    
+
     ['dragenter', 'dragover'].forEach(eventName => {
         els.fileDropZone.addEventListener(eventName, (e) => {
             e.preventDefault();
             els.fileDropZone.classList.add('dragover');
         }, false);
     });
-    
+
     ['dragleave', 'drop'].forEach(eventName => {
         els.fileDropZone.addEventListener(eventName, (e) => {
             e.preventDefault();
             els.fileDropZone.classList.remove('dragover');
         }, false);
     });
-    
+
     els.fileDropZone.addEventListener('drop', (e) => {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        if (files.length > 0) {
-            uploadRawDatasetFile(files[0]);
-        }
+        if (e.dataTransfer.files.length) uploadRawDatasetFile(e.dataTransfer.files[0]);
     });
-    
+
     els.removeFileBtn.addEventListener('click', () => {
-        if (appState.activeSessionId) {
-            deleteSession(appState.activeSessionId);
-        } else {
-            startNewAnalysis();
-        }
+        if (appState.activeSessionId) deleteSession(appState.activeSessionId);
+        else startNewAnalysis();
     });
 }
 
@@ -366,74 +683,329 @@ async function uploadRawDatasetFile(file) {
         alert('Unsupported file format. Please upload Excel (.xlsx, .xls) or CSV.');
         return;
     }
-    
-    showLoader('Uploading Dataset...', 'Sending file metadata to local storage database.');
-    
+
+    showLoader('Uploading dataset...', 'Saving the file and opening it for a first read.');
+
     const formData = new FormData();
     formData.append('file', file);
-    
+
     try {
-        const response = await fetch('/api/upload', {
-            method: 'POST',
-            body: formData
-        });
-        
+        const response = await apiFetch('/api/upload', { method: 'POST', body: formData });
         const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Upload failed');
-        }
-        
+        if (!response.ok) throw new Error(data.error || 'Upload failed');
+
         appState.activeSessionId = data.session_id;
-        
-        // Refresh session lists
         fetchSessionsHistory();
-        
-        // Pull detail
-        selectSession(data.session_id);
+        await selectSession(data.session_id);
+
+        // The server is already profiling. Track it in the read-out card
+        // instead of a blocking overlay, so the user can type their goal now.
+        hideLoader();
+        beginProfileReadout(data);
+        startStatusPolling(data.session_id);
     } catch (err) {
+        hideLoader();
         console.error(err);
         alert(err.message);
         startNewAnalysis();
-    } finally {
-        hideLoader();
     }
 }
 
-// 4. GOAL PRESETS
+/** Show the read-out card in its "reading" state right after upload. */
+function beginProfileReadout(uploadData) {
+    els.datasetReadout.classList.remove('hidden');
+    els.readoutStatus.className = 'readout-status busy';
+    els.readoutStatus.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Reading dataset&hellip;';
+    els.readoutProgressFill.style.width = '10%';
+    els.readoutRows.textContent = uploadData ? uploadData.row_count : '-';
+    els.readoutCols.textContent = uploadData ? uploadData.col_count : '-';
+    els.readoutMissing.textContent = '-';
+    els.readoutDupes.textContent = '-';
+    els.readoutTypes.innerHTML = '';
+    els.readoutWarnings.innerHTML = '';
+}
+
+/** Fill the read-out card once background profiling reports back. */
+function renderProfileSummary(summary) {
+    if (!summary) return;
+    els.datasetReadout.classList.remove('hidden');
+    els.readoutStatus.className = 'readout-status ready';
+    els.readoutStatus.innerHTML = '<i class="fa-solid fa-circle-check"></i> Dataset read &amp; profiled';
+    els.readoutProgressFill.style.width = '100%';
+
+    els.readoutRows.textContent = summary.shape ? summary.shape.rows : '-';
+    els.readoutCols.textContent = summary.shape ? summary.shape.cols : '-';
+    els.readoutMissing.textContent = `${summary.missing_pct ?? 0}%`;
+    els.readoutDupes.textContent = summary.duplicate_rows ?? 0;
+
+    const groups = [
+        ['numeric', summary.numeric_columns],
+        ['categorical', summary.categorical_columns],
+        ['datetime', summary.datetime_columns]
+    ];
+    els.readoutTypes.innerHTML = groups
+        .filter(([, cols]) => cols && cols.length)
+        .map(([label, cols]) =>
+            `<span class="type-chip type-${label}">${cols.length} ${label}</span>` +
+            cols.slice(0, 4).map(c => `<span class="type-col">${esc(c)}</span>`).join(''))
+        .join('');
+
+    els.readoutWarnings.innerHTML = (summary.warnings || []).slice(0, 4)
+        .map(w => `<li><i class="fa-solid fa-triangle-exclamation"></i> ${esc(w)}</li>`).join('');
+}
+
+async function changeActiveSheet() {
+    if (!appState.activeSessionId) return;
+    const sheetName = els.sheetSelect.value;
+    beginProfileReadout(null);
+    try {
+        await apiFetch(`/api/sessions/${appState.activeSessionId}/sheet`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sheet_name: sheetName })
+        });
+        startStatusPolling(appState.activeSessionId);
+    } catch (err) {
+        console.error('Sheet switch failed:', err);
+    }
+}
+
+/* ------------------------------------------------------------------ *
+ * 4. GOAL -> FULL ANALYSIS + CLEANING + PLOTTING
+ * ------------------------------------------------------------------ */
+
 function initGoalPresets() {
     els.goalInput.addEventListener('input', (e) => {
-        const isGoalFilled = e.target.value.trim().length > 0;
-        els.analyzeDataBtn.disabled = !(appState.activeSessionId && isGoalFilled);
+        els.analyzeDataBtn.disabled = !(appState.activeSessionId && e.target.value.trim().length > 0);
     });
-    
+
     els.presetBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            const val = btn.getAttribute('data-goal');
-            els.goalInput.value = val;
-            els.analyzeDataBtn.disabled = !(appState.activeSessionId);
+            els.goalInput.value = btn.getAttribute('data-goal');
+            els.analyzeDataBtn.disabled = !appState.activeSessionId;
         });
     });
 }
 
-// 5. WORKSPACE TABS SWITCHER
+async function runAiSchemaAnalysis() {
+    const goal = els.goalInput.value.trim();
+    if (!goal || !appState.activeSessionId) return;
+
+    appState.schemaRendered = false;
+    showLoader('Analysing your dataset...',
+        'Reusing the profile that was built while you typed, then consulting the AI model.');
+    updateLoaderProgress(5, 1);
+
+    try {
+        const response = await apiFetch('/api/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: appState.activeSessionId,
+                goal,
+                sheet_name: els.sheetSelect.value || 'Default',
+                ...llmPayload()
+            })
+        });
+
+        const data = await response.json();
+        if (!response.ok && response.status !== 202) {
+            throw new Error(data.error || 'Failed to start analysis');
+        }
+
+        // The server runs analysis -> cleaning -> plotting; we just follow along.
+        startStatusPolling(appState.activeSessionId);
+    } catch (err) {
+        hideLoader();
+        console.error(err);
+        alert(err.message);
+    }
+}
+
+/** Re-run cleaning + plotting after manual schema edits. */
+async function reprocessWithCurrentSchema() {
+    if (!appState.activeSessionId || !appState.sessionData) return;
+    els.processDataBtn.disabled = true;
+    showBgProcessingIndicator(true);
+    try {
+        await apiFetch(`/api/sessions/${appState.activeSessionId}/trigger_process`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                column_actions: appState.sessionData.column_actions,
+                sheet_name: els.sheetSelect.value || 'Default',
+                ...llmPayload()
+            })
+        });
+        startStatusPolling(appState.activeSessionId);
+    } catch (err) {
+        showBgProcessingIndicator(false);
+        console.error('Reprocess failed:', err);
+        alert(err.message);
+    }
+}
+
+/* ------------------------------------------------------------------ *
+ * 5. STATUS POLLING - one loop for the whole pipeline
+ * ------------------------------------------------------------------ */
+
+let _statusPollTimer = null;
+
+function stopStatusPolling() {
+    if (_statusPollTimer) {
+        clearInterval(_statusPollTimer);
+        _statusPollTimer = null;
+    }
+}
+
+function startStatusPolling(sessionId) {
+    stopStatusPolling();
+    _statusPollTimer = setInterval(() => pollStatusOnce(sessionId), 1500);
+    pollStatusOnce(sessionId);
+}
+
+async function pollStatusOnce(sessionId) {
+    if (!appState.activeSessionId || appState.activeSessionId !== sessionId) {
+        stopStatusPolling();
+        return;
+    }
+
+    let job;
+    try {
+        const response = await apiFetch(`/api/sessions/${sessionId}/status`);
+        job = await response.json();
+    } catch (err) {
+        console.warn('Status poll error:', err);
+        return;
+    }
+
+    const pct = job.progress || 0;
+    const message = job.progress_msg || '';
+
+    switch (job.status) {
+        // ---- Stage 1: reading the file, no AI involved ----------------
+        case 'profiling':
+            els.readoutProgressFill.style.width = `${Math.max(pct, 10)}%`;
+            els.readoutStatus.className = 'readout-status busy';
+            els.readoutStatus.innerHTML =
+                `<i class="fa-solid fa-circle-notch fa-spin"></i> ${esc(message || 'Reading dataset…')}`;
+            break;
+
+        case 'profile_ready':
+            stopStatusPolling();
+            renderProfileSummary(job.result && job.result.profile_summary);
+            break;
+
+        // ---- Stage 2: analysis, only after the goal was submitted -----
+        case 'analyzing':
+            updateLoaderProgress(Math.max(pct, 5), 2);
+            setLoaderSubtitle(message || 'Consulting the configured model...');
+            break;
+
+        case 'analyze_done':
+            updateLoaderProgress(100, 2);
+            setLoaderSubtitle('Recommendations ready - cleaning and plotting next...');
+            if (!appState.schemaRendered) {
+                await selectSession(sessionId);
+                appState.schemaRendered = true;
+            }
+            break;
+
+        // ---- Stage 3: cleaning + plotting -----------------------------
+        case 'processing':
+            if (!els.globalLoader.classList.contains('hidden')) {
+                updateLoaderProgress(pct, pct < 75 ? 3 : 4);
+                setLoaderSubtitle(message || 'Cleaning the dataset...');
+            }
+            showBgProcessingIndicator(true, `(${pct}%) ${message}`);
+            break;
+
+        case 'done':
+            stopStatusPolling();
+            updateLoaderProgress(100, 4);
+            // The schema grid is normally drawn at analyze_done, but a fast
+            // offline run can skip straight past it - so make sure it exists.
+            if (!appState.schemaRendered) {
+                await selectSession(sessionId);
+                appState.schemaRendered = true;
+            }
+            applyProcessResult(job.result);
+            hideLoader();
+            showBgProcessingIndicator(false);
+            fetchSessionsHistory();
+            break;
+
+        case 'error':
+            stopStatusPolling();
+            hideLoader();
+            showBgProcessingIndicator(false);
+            els.readoutStatus.className = 'readout-status fail';
+            els.readoutStatus.innerHTML =
+                `<i class="fa-solid fa-circle-exclamation"></i> ${esc(job.error || 'Failed')}`;
+            if (els.sectionSplitDashboard.classList.contains('active')) {
+                appendChatBubbleUI('assistant', `⚠️ Error: ${esc(job.error)}`, true);
+            } else {
+                alert(`Processing failed: ${job.error}`);
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
+function setLoaderSubtitle(text) {
+    if (els.loaderSubtitle) els.loaderSubtitle.textContent = text;
+}
+
+/** Paint stats, preview and charts from a finished processing run. */
+function applyProcessResult(result) {
+    if (!result) return;
+    enableTabs(true);
+
+    if (result.stats) {
+        els.statFinalRows.textContent = result.stats.final_rows;
+        els.statInitialRows.textContent = `(Original: ${result.stats.initial_rows})`;
+        els.statFinalCols.textContent = result.stats.final_cols;
+        els.statDroppedCols.textContent = `(Dropped: ${result.stats.dropped_columns.length})`;
+    }
+
+    if (result.download_url) {
+        els.downloadBtn.setAttribute('href', withToken(result.download_url));
+        els.downloadBtn.classList.remove('hidden');
+        els.generatePdfBtn.classList.remove('hidden');
+        els.downloadPdfLink.classList.add('hidden');
+    }
+
+    if (result.preview) renderTablePreview(result.preview);
+    if (result.charts) renderCharts(result.charts);
+    els.processDataBtn.disabled = true;
+}
+
+function showBgProcessingIndicator(show, text) {
+    let pill = document.getElementById('bg-processing-pill');
+    if (!pill) {
+        pill = document.createElement('div');
+        pill.id = 'bg-processing-pill';
+        pill.className = 'bg-processing-pill';
+        const workspacePanel = document.querySelector('.workspace-panel');
+        if (workspacePanel) workspacePanel.prepend(pill);
+    }
+    pill.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> ${esc(text || 'Updating data in background…')}`;
+    pill.style.display = show ? 'flex' : 'none';
+}
+
+/* ------------------------------------------------------------------ *
+ * 6. TABS AND SESSION RENDERING
+ * ------------------------------------------------------------------ */
+
 function initTabs() {
     els.tabButtons.forEach(btn => {
         btn.addEventListener('click', () => {
             const targetPaneId = btn.getAttribute('data-tab');
-            
-            // Toggle buttons classes
             els.tabButtons.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            
-            // Toggle panes classes
-            els.tabPanes.forEach(pane => {
-                if (pane.id === targetPaneId) {
-                    pane.classList.add('active');
-                } else {
-                    pane.classList.remove('active');
-                }
-            });
+            els.tabPanes.forEach(pane => pane.classList.toggle('active', pane.id === targetPaneId));
         });
     });
 }
@@ -444,531 +1016,281 @@ function enableTabs(enable) {
     els.tabBtnExport.disabled = !enable;
 }
 
-// Switch tabs utility
 function switchToTab(tabId) {
     const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
     if (btn) btn.click();
 }
 
-// 6. RENDER STATE (POPULATES CHAT AND TABS FROM DATABASE)
 function renderLoadedSessionUI() {
-    const s = appState.sessionData;
-    
-    // If goal is empty, we show the upload panel step 1
-    if (!s.goal) {
-        // Populates upload detail
-        els.detailFilename.textContent = s.original_filename;
-        els.detailFilesize.textContent = `${s.row_count} rows x ${s.col_count} columns`;
+    const session = appState.sessionData;
+
+    // No goal yet -> stay on the upload/read-out/goal screen.
+    if (!session.goal) {
+        els.detailFilename.textContent = session.original_filename;
+        els.detailFilesize.textContent = `${session.row_count} rows x ${session.col_count} columns`;
         els.fileDropZone.classList.add('hidden');
         els.fileDetailsContainer.classList.remove('hidden');
-        
-        if (s.sheets && s.sheets.length > 1) {
+
+        if (session.sheets && session.sheets.length > 1) {
             els.sheetSelect.innerHTML = '';
-            s.sheets.forEach(sheet => {
-                const opt = document.createElement('option');
-                opt.value = sheet;
-                opt.textContent = sheet;
-                els.sheetSelect.appendChild(opt);
+            session.sheets.forEach(sheet => {
+                const option = document.createElement('option');
+                option.value = sheet;
+                option.textContent = sheet;
+                els.sheetSelect.appendChild(option);
             });
+            els.sheetSelect.value = session.sheet_name || session.sheets[0];
             els.sheetSelectWrapper.classList.remove('hidden');
         } else {
             els.sheetSelectWrapper.classList.add('hidden');
         }
-        
-        els.goalInput.value = '';
-        els.analyzeDataBtn.disabled = true;
-        
-        // Show Step 1
-        els.workspaceTitle.textContent = "Data Upload & Objective";
-        els.workspaceSubtitle.textContent = "Provide your raw training Excel file and state what model you plan to train.";
+
+        els.analyzeDataBtn.disabled = !els.goalInput.value.trim();
+
+        if (session.profile) {
+            renderProfileSummary({
+                shape: session.profile.shape,
+                missing_pct: session.profile.missing_pct,
+                duplicate_rows: session.profile.duplicate_rows,
+                numeric_columns: session.profile.numeric_columns,
+                categorical_columns: session.profile.categorical_columns,
+                datetime_columns: session.profile.datetime_columns,
+                warnings: session.profile.warnings
+            });
+        }
+
+        els.workspaceTitle.textContent = 'Data Upload & Objective';
+        els.workspaceSubtitle.textContent =
+            'Dataset loaded. Tell Mercury your goal to start the full analysis.';
         els.sectionStep1.classList.add('active');
         els.sectionSplitDashboard.classList.remove('active');
         return;
     }
-    
-    // If goal is set, show split screen dashboard
-    els.workspaceTitle.textContent = s.name;
-    els.workspaceSubtitle.textContent = `Goal: ${s.goal}`;
-    
+
+    // Goal is set -> dashboard.
+    els.workspaceTitle.textContent = session.name;
+    els.workspaceSubtitle.textContent = `Goal: ${session.goal}`;
     els.sectionStep1.classList.remove('active');
     els.sectionSplitDashboard.classList.add('active');
-    
-    // Draw Chat history
+
     renderChatMessages();
-    
-    // Draw schema recomendations checklist
     renderSchemaActionsGrid();
-    
-    // If cleaned_filename exists (already processed)
-    if (s.cleaned_filename) {
+    appState.schemaRendered = true;
+
+    // Restore the last completed run so a reload does not lose the dashboard.
+    if (session.bg_result) {
+        applyProcessResult(session.bg_result);
+    } else if (session.cleaned_filename) {
         enableTabs(true);
-        // Stats
-        els.statFinalRows.textContent = s.row_count; // dummy, we'll fetch clean stats if available
-        els.statFinalCols.textContent = Object.keys(s.column_actions).length;
-        
-        // Build Excel Link
-        els.downloadBtn.setAttribute('href', `/api/download/${s.cleaned_filename}`);
+        els.downloadBtn.setAttribute('href', withToken(`/api/download/${session.cleaned_filename}`));
         els.downloadBtn.classList.remove('hidden');
-        
-        // PDF configuration
-        if (s.pdf_filename) {
-            els.generatePdfBtn.classList.add('hidden');
-            els.downloadPdfLink.setAttribute('href', `/api/sessions/${s.session_id}/download_pdf`);
-            els.downloadPdfLink.classList.remove('hidden');
-        } else {
-            els.generatePdfBtn.classList.remove('hidden');
-            els.downloadPdfLink.classList.add('hidden');
-        }
-        if (els.processDataBtn) {
-            els.processDataBtn.disabled = false;
-        }
     } else {
         enableTabs(false);
         switchToTab('tab-schema');
-        if (els.processDataBtn) {
-            els.processDataBtn.disabled = true;
-        }
+    }
+
+    if (session.pdf_filename) {
+        els.generatePdfBtn.classList.add('hidden');
+        els.downloadPdfLink.setAttribute('href', withToken(`/api/sessions/${session.session_id}/download_pdf`));
+        els.downloadPdfLink.classList.remove('hidden');
+    }
+
+    // A session reopened mid-run should keep following the pipeline.
+    if (session.job && ['profiling', 'analyzing', 'processing'].includes(session.job.status)) {
+        startStatusPolling(session.session_id);
     }
 }
 
-// Render chat messages
 function renderChatMessages() {
-    const container = els.chatMessages;
-    container.innerHTML = '';
-    
-    const messages = appState.sessionData.chat_history || [];
-    messages.forEach(msg => {
-        appendChatBubbleUI(msg.role, msg.content, false);
-    });
-    
-    // Scroll
-    container.scrollTop = container.scrollHeight;
+    els.chatMessages.innerHTML = '';
+    (appState.sessionData.chat_history || []).forEach(msg =>
+        appendChatBubbleUI(msg.role, msg.content, false));
+    els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
 }
 
+/**
+ * Assistant messages may contain a small amount of trusted markup (the PDF
+ * download link, <b>/<br>). User messages never do, so they are escaped.
+ */
 function appendChatBubbleUI(role, content, animate = true) {
     const bubble = document.createElement('div');
     bubble.className = `chat-message ${role}`;
     if (!animate) bubble.style.animation = 'none';
-    
+
     const meta = document.createElement('span');
     meta.className = 'chat-message-meta';
     meta.textContent = role === 'user' ? 'You' : 'AI Assistant';
-    
+
     const body = document.createElement('div');
-    body.innerHTML = content; // Allows links/HTML rendering
-    
+    if (role === 'user') body.textContent = content;
+    else body.innerHTML = sanitizeAssistantHtml(content);
+
     bubble.appendChild(meta);
     bubble.appendChild(body);
     els.chatMessages.appendChild(bubble);
-    
-    if (animate) {
-        els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
-    }
+
+    if (animate) els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
 }
 
-async function runAiSchemaAnalysis() {
-    const goal = els.goalInput.value.trim();
-    if (!goal || !appState.activeSessionId) return;
-
-    // Show loader IMMEDIATELY — it will now stay open and track REAL backend progress
-    showLoader('AI is Parsing Dataset...', 'Sending to Nvidia GLM-5.2 — tracking progress below.');
-    updateLoaderProgress(5, 1);
-
-    try {
-        const response = await fetch('/api/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                session_id: appState.activeSessionId,
-                goal: goal,
-                api_key: appState.apiKey,
-                sheet_name: els.sheetSelect.value || 'Default'
-            })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || 'Failed to queue analysis');
-        }
-
-        // Analysis is now running in background — start polling for real progress
-        // The loader stays open and updates itself via startStatusPolling
-        startStatusPolling(appState.activeSessionId, { mode: 'analyze' });
-
-    } catch (err) {
-        hideLoader();
-        console.error(err);
-        alert(err.message);
-    }
-    // NOTE: we do NOT call hideLoader() here — startStatusPolling will do it when done
+/** Escape everything, then re-allow a small tag whitelist and our PDF link. */
+function sanitizeAssistantHtml(content) {
+    let html = esc(content)
+        .replace(/&lt;br\s*\/?&gt;/gi, '<br>')
+        .replace(/&lt;(\/?)(b|strong|i|em|code|ul|li|p)&gt;/gi, '<$1$2>')
+        .replace(/&lt;a href=&#39;(\/api\/sessions\/[\w-]+\/download_pdf)&#39;[^&]*?&gt;([\s\S]*?)&lt;\/a&gt;/gi,
+            '<a href="$1" class="btn btn-emerald chat-inline-btn">$2</a>')
+        .replace(/&lt;i class=&#39;([\w\s-]+)&#39;&gt;&lt;\/i&gt;/gi, '<i class="$1"></i>');
+    return renderChatMarkdown(html);
 }
 
-
-/** Fire the background process on the server (non-blocking) */
-async function triggerBackgroundProcess() {
-    if (!appState.activeSessionId) return;
-    try {
-        await fetch(`/api/sessions/${appState.activeSessionId}/trigger_process`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                api_key: appState.apiKey,
-                sheet_name: els.sheetSelect ? els.sheetSelect.value || 'Default' : 'Default'
-            })
-        });
-    } catch (err) {
-        console.warn('trigger_process failed:', err);
-    }
+/** Lightweight markdown: **bold**, *italic*, `code`, newlines. */
+function renderChatMarkdown(text) {
+    return text
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>');
 }
 
-/** Poll /status every 2s for both analysis and data-processing jobs */
-let _statusPollTimer = null;
-function startStatusPolling(sessionId, opts = {}) {
-    // Cancel any existing poll
-    if (_statusPollTimer) { clearInterval(_statusPollTimer); _statusPollTimer = null; }
-    const mode = opts.mode || 'process'; // 'analyze' | 'process'
+/* ------------------------------------------------------------------ *
+ * 7. SCHEMA GRID
+ * ------------------------------------------------------------------ */
 
-    _statusPollTimer = setInterval(async () => {
-        if (!appState.activeSessionId || appState.activeSessionId !== sessionId) {
-            clearInterval(_statusPollTimer); _statusPollTimer = null; return;
-        }
-        try {
-            const res = await fetch(`/api/sessions/${sessionId}/status`);
-            const job = await res.json();
-
-            // ── ANALYZE PHASE ────────────────────────────────────────────────
-            if (job.status === 'analyzing') {
-                const pct = job.progress || 5;
-                const msg = job.progress_msg || 'Consulting Nvidia GLM-5.2...';
-                updateLoaderProgress(pct, _pctToStep(pct));
-                // Update loader subtitle live
-                const subtitle = document.getElementById('loader-subtitle');
-                if (subtitle) subtitle.textContent = msg;
-
-            } else if (job.status === 'analyze_done' && job.result) {
-                clearInterval(_statusPollTimer); _statusPollTimer = null;
-
-                // Flash 100% and close loader
-                updateLoaderProgress(100, 5);
-                await new Promise(r => setTimeout(r, 700));
-                hideLoader();
-
-                if (job.result.warning) console.warn('Analysis warning:', job.result.warning);
-
-                // Refresh session to load schema grid
-                await selectSession(appState.activeSessionId);
-
-                // Auto-trigger background data processing
-                showBgProcessingIndicator(true);
-                await triggerBackgroundProcess();
-                startStatusPolling(appState.activeSessionId, { mode: 'process' });
-
-            // ── PROCESS PHASE ────────────────────────────────────────────────
-            } else if (job.status === 'processing') {
-                const pct = job.progress || 0;
-                const msg = job.progress_msg || 'Updating data in background…';
-
-                const pill = document.getElementById('bg-processing-pill');
-                if (pill) pill.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> (${pct}%) ${msg}`;
-
-                // If loader is somehow still open (edge case) update it too
-                if (!els.globalLoader.classList.contains('hidden')) {
-                    updateLoaderProgress(pct, _pctToStep(pct));
-                }
-
-            } else if (job.status === 'done' && job.result) {
-                clearInterval(_statusPollTimer); _statusPollTimer = null;
-                showBgProcessingIndicator(false);
-
-                const d = job.result;
-                enableTabs(true);
-
-                if (d.stats) {
-                    els.statFinalRows.textContent = d.stats.final_rows;
-                    els.statInitialRows.textContent = `(Original: ${d.stats.initial_rows})`;
-                    els.statFinalCols.textContent = d.stats.final_cols;
-                    els.statDroppedCols.textContent = `(Dropped: ${d.stats.dropped_columns.length})`;
-                }
-
-                if (d.download_url) {
-                    els.downloadBtn.setAttribute('href', d.download_url);
-                    els.downloadBtn.classList.remove('hidden');
-                    els.generatePdfBtn.classList.remove('hidden');
-                    els.downloadPdfLink.classList.add('hidden');
-                }
-
-                if (d.preview) renderTablePreview(d.preview);
-
-                if (d.charts) {
-                    appState.chartInstances.forEach(c => c.destroy());
-                    appState.chartInstances = [];
-                    renderCharts(d.charts);
-                }
-
-                appendChatBubbleUI('assistant',
-                    `✅ Dataset processed. Preview and charts have been updated.`, true);
-
-            } else if (job.status === 'error') {
-                clearInterval(_statusPollTimer); _statusPollTimer = null;
-                showBgProcessingIndicator(false);
-                hideLoader();
-                appendChatBubbleUI('assistant', `⚠️ Error: ${job.error}`, true);
-                console.warn('Job error:', job.error);
-            }
-        } catch (pollErr) {
-            console.warn('Status poll error:', pollErr);
-        }
-    }, 2000);
-}
-
-/** Map a progress % to the step number shown in the loader checklist */
-function _pctToStep(pct) {
-    if (pct < 20) return 1;
-    if (pct < 45) return 2;
-    if (pct < 75) return 3;
-    return 4;
-}
-
-
-/** Show/hide the subtle background processing indicator pill */
-function showBgProcessingIndicator(show) {
-    let pill = document.getElementById('bg-processing-pill');
-    if (!pill) {
-        pill = document.createElement('div');
-        pill.id = 'bg-processing-pill';
-        pill.className = 'bg-processing-pill';
-        pill.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Updating data in background…';
-        // Insert into workspace panel header
-        const wsPanel = document.querySelector('.workspace-panel');
-        if (wsPanel) wsPanel.prepend(pill);
-    }
-    pill.style.display = show ? 'flex' : 'none';
-}
-
-
-
-// Renders schema grid actions
 function renderSchemaActionsGrid() {
     const grid = els.columnsRecommendationGrid;
     grid.innerHTML = '';
-    
-    const s = appState.sessionData;
-    const originalCols = s.columns;
-    
-    originalCols.forEach(col => {
-        const rec = s.column_actions[col.name] || { action: 'keep', reason: 'Default', transformation: '' };
-        
+
+    const session = appState.sessionData;
+    if (!session.column_actions) session.column_actions = {};
+
+    (session.columns || []).forEach(column => {
+        if (!session.column_actions[column.name]) {
+            session.column_actions[column.name] =
+                { action: 'keep', reason: 'Default - kept as-is.', transformation: null };
+        }
+        const rec = session.column_actions[column.name];
+
         const card = document.createElement('div');
         card.className = `column-card ${rec.action}-status`;
-        card.id = `col-card-${btoa(col.name).replace(/=/g, '')}`;
-        
-        const sampleTags = col.sample_values.map(val => `<span class="sample-tag" title="${val}">${val}</span>`).join('');
-        
+        card.id = nextDomId('col-card');
+
+        const sampleTags = (column.sample_values || [])
+            .map(value => `<span class="sample-tag" title="${esc(value)}">${esc(value)}</span>`)
+            .join('');
+
+        const nullLabel = column.null_pct !== undefined
+            ? `${column.null_pct}% null`
+            : `${column.null_count || 0} nulls`;
+        const kindLabel = column.semantic_type ? `<span>${esc(column.semantic_type)}</span>` : '';
+
         card.innerHTML = `
             <div class="col-card-header">
                 <div class="col-name-wrapper">
-                    <div class="col-name" title="${col.name}">${col.name}</div>
+                    <div class="col-name" title="${esc(column.name)}">${esc(column.name)}</div>
                     <div class="col-meta">
-                        <span>${col.type}</span>
-                        <span>${col.null_count} nulls</span>
+                        <span>${esc(column.type)}</span>
+                        ${kindLabel}
+                        <span>${esc(nullLabel)}</span>
                     </div>
                 </div>
-                
                 <div class="col-selector-group">
                     <button class="action-selector ${rec.action === 'keep' ? 'active' : ''}" data-action="keep">Keep</button>
                     <button class="action-selector ${rec.action === 'transform' ? 'active' : ''}" data-action="transform">Trans</button>
                     <button class="action-selector ${rec.action === 'drop' ? 'active' : ''}" data-action="drop">Drop</button>
                 </div>
             </div>
-            
             <div class="col-card-body">
-                <div class="ai-reasoning">
-                    <p>${rec.reason}</p>
-                </div>
-                
+                <div class="ai-reasoning"><p>${esc(rec.reason)}</p></div>
                 <div class="transformation-editor ${rec.action === 'transform' ? '' : 'hidden'}">
                     <label>Transformation Logic:</label>
-                    <input type="text" class="transform-input" value="${rec.transformation || ''}" placeholder="e.g. Impute missing with median">
+                    <input type="text" class="transform-input" value="${esc(rec.transformation || '')}"
+                           placeholder="e.g. Impute missing with median">
                 </div>
-                
                 <div class="col-samples">
                     <span class="samples-label">Samples:</span>
                     <div class="samples-tags">${sampleTags || '<span class="text-muted font-size-xs">No data</span>'}</div>
                 </div>
             </div>
         `;
-        
-        // Manual override clicks
+
         const buttons = card.querySelectorAll('.action-selector');
         buttons.forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const action = e.target.getAttribute('data-action');
-                
-                // Update local state
-                s.column_actions[col.name].action = action;
-                
+                session.column_actions[column.name].action = action;
+
                 buttons.forEach(b => b.classList.remove('active'));
                 e.target.classList.add('active');
-                
                 card.className = `column-card ${action}-status`;
-                
-                const transEditor = card.querySelector('.transformation-editor');
-                if (action === 'transform') {
-                    transEditor.classList.remove('hidden');
-                } else {
-                    transEditor.classList.add('hidden');
-                }
-                
+                card.querySelector('.transformation-editor').classList.toggle('hidden', action !== 'transform');
+
                 recalcSummaryCounts();
                 els.processDataBtn.disabled = false;
             });
         });
-        
-        // Manual transform changes
-        const transInput = card.querySelector('.transform-input');
-        transInput.addEventListener('input', (e) => {
-            s.column_actions[col.name].transformation = e.target.value;
-        });
-        
-        // Trigger auto reprocess when user finishes editing transform text (on change or blur or enter)
-        transInput.addEventListener('change', () => {
+
+        const transformInput = card.querySelector('.transform-input');
+        transformInput.addEventListener('input', (e) => {
+            session.column_actions[column.name].transformation = e.target.value;
             els.processDataBtn.disabled = false;
         });
-        transInput.addEventListener('blur', () => {
-            els.processDataBtn.disabled = false;
-        });
-        transInput.addEventListener('keydown', (e) => {
+        transformInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                transInput.blur();
+                transformInput.blur();
             }
         });
-        
+
         grid.appendChild(card);
     });
-    
+
     recalcSummaryCounts();
 }
 
-/** Triggers background data processing on the server with current manual grid actions */
-async function autoReprocessWithGridState() {
-    // Disabled: do not auto-trigger full processing on every schema change.
-    // Users should press Process Data once they are happy with the schema actions.
-}
-
-
 function recalcSummaryCounts() {
-    let keep = 0, drop = 0, trans = 0;
-    const values = Object.values(appState.sessionData.column_actions);
-    
+    let keep = 0, drop = 0, transform = 0;
+    const values = Object.values(appState.sessionData.column_actions || {});
     values.forEach(v => {
         if (v.action === 'keep') keep++;
         else if (v.action === 'drop') drop++;
-        else if (v.action === 'transform') trans++;
+        else if (v.action === 'transform') transform++;
     });
-    
     els.recTotalCols.textContent = values.length;
     els.recKeepCols.textContent = keep;
     els.recDropCols.textContent = drop;
-    els.recTransformCols.textContent = trans;
+    els.recTransformCols.textContent = transform;
 }
 
-// 8. PANDAS DATA PROCESS (APPLY CLEAN RULES)
-async function executePandasProcess() {
-    if (!appState.activeSessionId) return;
-    
-    showLoader('Processing & Cleaning Data...', 'Pandas is rebuilding the dataset while Nvidia GLM-5.2 configures charts.');
-    
-    try {
-        const response = await fetch('/api/process', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                session_id: appState.activeSessionId,
-                actions: appState.sessionData.column_actions,
-                api_key: appState.apiKey,
-                sheet_name: els.sheetSelect.value || 'Default'
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Processing dataset failed');
-        }
-        
-        // Enable preview tabs
-        enableTabs(true);
-        
-        // Stats
-        els.statFinalRows.textContent = data.stats.final_rows;
-        els.statInitialRows.textContent = `(Original: ${data.stats.initial_rows})`;
-        els.statFinalCols.textContent = data.stats.final_cols;
-        els.statDroppedCols.textContent = `(Dropped: ${data.stats.dropped_columns.length})`;
-        
-        // Download Excel URL
-        els.downloadBtn.setAttribute('href', data.download_url);
-        els.downloadBtn.classList.remove('hidden');
-        els.generatePdfBtn.classList.remove('hidden');
-        els.downloadPdfLink.classList.add('hidden');
-        
-        // Draw previews
-        renderTablePreview(data.preview);
-        
-        // Destroy existing Chart.js instances
-        appState.chartInstances.forEach(chart => chart.destroy());
-        appState.chartInstances = [];
-        
-        // Draw visualizations
-        renderCharts(data.charts);
-        
-        // Reload session data history list
-        fetchSessionsHistory();
-        
-        // Reload details state
-        await selectSession(appState.activeSessionId);
-        
-        // Switch to preview tab
-        switchToTab('tab-preview');
-
-        appendChatBubbleUI('assistant', '✅ Data cleaning is complete. Ask me what visualization you want next, and I will prepare it for you.', true);
-        
-    } catch (err) {
-        console.error(err);
-        alert(err.message);
-    } finally {
-        hideLoader();
-    }
-}
+/* ------------------------------------------------------------------ *
+ * 8. PREVIEW AND CHARTS
+ * ------------------------------------------------------------------ */
 
 function renderTablePreview(previewRows) {
     const table = els.cleanedPreviewTable;
     const thead = table.querySelector('thead');
     const tbody = table.querySelector('tbody');
-    
     thead.innerHTML = '';
     tbody.innerHTML = '';
-    
-    if (!previewRows || previewRows.length === 0) {
+
+    if (!previewRows || !previewRows.length) {
         thead.innerHTML = '<tr><th>No Data Available</th></tr>';
         return;
     }
-    
+
     const headers = Object.keys(previewRows[0]);
     const headerRow = document.createElement('tr');
-    headers.forEach(h => {
+    headers.forEach(header => {
         const th = document.createElement('th');
-        th.textContent = h;
+        th.textContent = header;
         headerRow.appendChild(th);
     });
     thead.appendChild(headerRow);
-    
+
     previewRows.forEach(row => {
         const tr = document.createElement('tr');
-        headers.forEach(h => {
+        headers.forEach(header => {
             const td = document.createElement('td');
-            td.textContent = row[h];
+            td.textContent = row[header];
             tr.appendChild(td);
         });
         tbody.appendChild(tr);
@@ -977,134 +1299,143 @@ function renderTablePreview(previewRows) {
 
 function renderCharts(chartsData) {
     const grid = els.dashboardChartsGrid;
+
+    appState.chartInstances.forEach(chart => chart.destroy());
+    appState.chartInstances = [];
     grid.innerHTML = '';
-    
-    if (!chartsData || chartsData.length === 0) {
+
+    if (!chartsData || !chartsData.length) {
         grid.innerHTML = `
             <div class="glass-card chart-card" style="grid-column: 1 / -1; height: 180px; align-items: center; justify-content: center;">
-                <p class="text-muted"><i class="fa-solid fa-chart-bar" style="font-size: 2rem; margin-bottom: 0.5rem;"></i><br>No charts generated. AI visualization recommendations are empty.</p>
-            </div>
-        `;
+                <p class="text-muted"><i class="fa-solid fa-chart-bar" style="font-size: 2rem; margin-bottom: 0.5rem;"></i><br>
+                No charts yet. Ask the assistant for a plot, or reprocess the dataset.</p>
+            </div>`;
         return;
     }
-    
+
     chartsData.forEach((chart, index) => {
         const card = document.createElement('div');
         card.className = 'glass-card chart-card';
-        
-        const canvasId = `chart-canvas-${index}`;
+        const canvasId = nextDomId('chart-canvas');
+
         card.innerHTML = `
             <div class="chart-header">
-                <h4>${chart.title}</h4>
-                <p title="${chart.description}">${chart.description}</p>
+                <h4>${esc(chart.title)}</h4>
+                <p title="${esc(chart.description)}">${esc(chart.description)}</p>
             </div>
-            <div class="chart-wrapper">
-                <canvas id="${canvasId}"></canvas>
-            </div>
+            <div class="chart-wrapper"><canvas id="${canvasId}"></canvas></div>
         `;
         grid.appendChild(card);
-        
+
         try {
             const ctx = document.getElementById(canvasId).getContext('2d');
-            let config = {};
-            
-            if (chart.chart_type === 'scatter') {
-                config = {
-                    type: 'scatter',
-                    data: {
-                        datasets: [{
-                            label: `${chart.y_axis} vs ${chart.x_axis}`,
-                            data: chart.points,
-                            backgroundColor: chartColors.primary,
-                            borderColor: chartColors.primary,
-                            pointRadius: 5
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
-                            y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
-                        }
-                    }
-                };
-            } else if (chart.chart_type === 'pie') {
-                config = {
-                    type: 'pie',
-                    data: {
-                        labels: chart.labels,
-                        datasets: [{
-                            data: chart.values,
-                            backgroundColor: chartColors.palette,
-                            borderWidth: 1,
-                            borderColor: 'rgba(255, 255, 255, 0.1)'
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'right',
-                                labels: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 9 } }
-                            }
-                        }
-                    }
-                };
-            } else {
-                const isLine = chart.chart_type === 'line';
-                config = {
-                    type: isLine ? 'line' : 'bar',
-                    data: {
-                        labels: chart.labels,
-                        datasets: [{
-                            label: chart.y_axis || 'Frequency',
-                            data: chart.values,
-                            backgroundColor: isLine ? chartColors.primaryAlpha : chartColors.palette[index % chartColors.palette.length],
-                            borderColor: chartColors.primary,
-                            borderWidth: 2,
-                            fill: isLine,
-                            tension: 0.35
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 8 } } },
-                            y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
-                        }
-                    }
-                };
-            }
-            
-            const inst = new Chart(ctx, config);
-            appState.chartInstances.push(inst);
-        } catch (ex) {
-            console.error(`Chart draw error for ${canvasId}:`, ex);
+            appState.chartInstances.push(new Chart(ctx, buildChartConfig(chart, index)));
+        } catch (err) {
+            console.error(`Chart draw error for ${canvasId}:`, err);
         }
     });
 }
 
-// 9. CONVERSATIONAL CHAT SUBMISSIONS
+function buildChartConfig(chart, index) {
+    const axisTicks = { color: '#94a3b8', font: { size: 9 } };
+    const gridLine = { color: 'rgba(255, 255, 255, 0.05)' };
+
+    if (chart.chart_type === 'scatter') {
+        return {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: `${chart.y_axis} vs ${chart.x_axis}`,
+                    data: chart.points,
+                    backgroundColor: chartColors.accent,
+                    pointRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { title: { display: true, text: chart.x_axis, color: '#94a3b8' }, grid: gridLine, ticks: axisTicks },
+                    y: { title: { display: true, text: chart.y_axis, color: '#94a3b8' }, grid: gridLine, ticks: axisTicks }
+                }
+            }
+        };
+    }
+
+    if (chart.chart_type === 'pie') {
+        return {
+            type: 'pie',
+            data: {
+                labels: chart.labels,
+                datasets: [{
+                    data: chart.values,
+                    backgroundColor: chartColors.palette,
+                    borderWidth: 1,
+                    borderColor: 'rgba(255, 255, 255, 0.1)'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'right', labels: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 9 } } }
+                }
+            }
+        };
+    }
+
+    const isLine = chart.chart_type === 'line';
+    const isHorizontal = chart.orientation === 'horizontal';
+    // Correlation charts are signed, so colour negatives differently.
+    const backgroundColor = isHorizontal
+        ? chart.values.map(v => (v < 0 ? chartColors.danger : chartColors.primary))
+        : (isLine ? chartColors.primaryAlpha : chartColors.palette[index % chartColors.palette.length]);
+
+    return {
+        type: isLine ? 'line' : 'bar',
+        data: {
+            labels: chart.labels,
+            datasets: [{
+                label: chart.y_axis || 'Value',
+                data: chart.values,
+                backgroundColor,
+                borderColor: chartColors.primary,
+                borderWidth: isLine ? 2 : 0,
+                fill: isLine,
+                tension: 0.35
+            }]
+        },
+        options: {
+            indexAxis: isHorizontal ? 'y' : 'x',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: isHorizontal ? gridLine : { display: false }, ticks: axisTicks },
+                y: { grid: isHorizontal ? { display: false } : gridLine, ticks: axisTicks }
+            }
+        }
+    };
+}
+
+/* ------------------------------------------------------------------ *
+ * 9. CHAT
+ * ------------------------------------------------------------------ */
+
 function initChatConsole() {
     els.chatSendBtn.addEventListener('click', sendChatUserMessage);
-    
+
     els.chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             sendChatUserMessage();
         }
     });
-    
-    // Bind suggested chips
+
     document.querySelectorAll('.suggestion-chip').forEach(chip => {
         chip.addEventListener('click', () => {
-            const txt = chip.getAttribute('data-text');
-            els.chatInput.value = txt;
+            els.chatInput.value = chip.getAttribute('data-text');
             sendChatUserMessage();
         });
     });
@@ -1114,15 +1445,12 @@ async function sendChatUserMessage() {
     const text = els.chatInput.value.trim();
     if (!text || !appState.activeSessionId) return;
 
-    // Clear and disable inputs
     els.chatInput.value = '';
     els.chatInput.disabled = true;
     els.chatSendBtn.disabled = true;
 
-    // Show user bubble immediately
     appendChatBubbleUI('user', text, true);
 
-    // Create a streaming AI bubble with a blinking cursor
     const aiBubble = document.createElement('div');
     aiBubble.className = 'chat-message assistant streaming';
     const aiMeta = document.createElement('span');
@@ -1139,13 +1467,10 @@ async function sendChatUserMessage() {
     let fullText = '';
 
     try {
-        const response = await fetch(`/api/sessions/${appState.activeSessionId}/chat/stream`, {
+        const response = await apiFetch(`/api/sessions/${appState.activeSessionId}/chat/stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: text,
-                api_key: appState.apiKey
-            })
+            body: JSON.stringify({ message: text, ...llmPayload() })
         });
 
         if (!response.ok) {
@@ -1156,121 +1481,100 @@ async function sendChatUserMessage() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let eventType = 'message';
 
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
             buffer += decoder.decode(value, { stream: true });
-
-            // Process complete SSE lines from the buffer
             const lines = buffer.split('\n');
-            buffer = lines.pop(); // Keep incomplete last line
+            buffer = lines.pop();
 
-            let eventType = 'message';
             for (const line of lines) {
                 if (line.startsWith('event: ')) {
                     eventType = line.slice(7).trim();
-                } else if (line.startsWith('data: ')) {
-                    const raw = line.slice(6).trim();
-                    if (!raw) continue;
-
-                    try {
-                        const parsed = JSON.parse(raw);
-
-                        if (eventType === 'schema_updates') {
-                            // Apply schema updates to local state (no re-fetch needed)
-                            if (parsed.column_actions) {
-                                appState.sessionData.column_actions = parsed.column_actions;
-                            }
-                            if (parsed.schema_updates && Object.keys(parsed.schema_updates).length > 0) {
-                                renderSchemaActionsGrid();
-                                if (els.processDataBtn) {
-                                    els.processDataBtn.disabled = false;
-                                }
-                            }
-                            // Do not auto-trigger processing from chat updates.
-                            eventType = 'message'; // Reset for next event
-
-                        } else if (eventType === 'done') {
-                            // Finalize bubble — remove cursor, render markdown-ish bold
-                            fullText = parsed.full_message || fullText;
-                            aiBody.innerHTML = renderChatMarkdown(fullText);
-                            aiBubble.classList.remove('streaming');
-                            eventType = 'message';
-
-                        } else {
-                            // Regular token — stream into bubble
-                            if (parsed.token !== undefined) {
-                                fullText += parsed.token;
-                                aiBody.innerHTML = renderChatMarkdown(fullText) + '<span class="typing-cursor">▋</span>';
-                                els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
-                            }
-                        }
-                    } catch (parseErr) {
-                        // Non-JSON line (e.g. empty keep-alive), ignore
-                    }
-                } else if (line === '') {
-                    // Blank line = end of SSE event block; reset type
+                    continue;
+                }
+                if (line === '') {
                     eventType = 'message';
+                    continue;
+                }
+                if (!line.startsWith('data: ')) continue;
+
+                const raw = line.slice(6).trim();
+                if (!raw) continue;
+
+                let parsed;
+                try {
+                    parsed = JSON.parse(raw);
+                } catch (parseErr) {
+                    continue; // keep-alive or partial line
+                }
+
+                if (eventType === 'schema_updates') {
+                    if (parsed.column_actions) {
+                        appState.sessionData.column_actions = parsed.column_actions;
+                    }
+                    if (parsed.schema_updates && Object.keys(parsed.schema_updates).length) {
+                        renderSchemaActionsGrid();
+                    }
+                    if (parsed.trigger_reprocess) {
+                        showBgProcessingIndicator(true);
+                        startStatusPolling(appState.activeSessionId);
+                    }
+                } else if (eventType === 'charts') {
+                    renderCharts(parsed.charts || []);
+                    enableTabs(true);
+                    switchToTab('tab-viz');
+                } else if (eventType === 'done') {
+                    fullText = parsed.full_message || fullText;
+                    aiBody.innerHTML = sanitizeAssistantHtml(fullText);
+                    aiBubble.classList.remove('streaming');
+                } else if (parsed.token !== undefined) {
+                    fullText += parsed.token;
+                    aiBody.innerHTML = sanitizeAssistantHtml(fullText) + '<span class="typing-cursor">▋</span>';
+                    els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
                 }
             }
         }
-
     } catch (err) {
         console.error('Chat stream error:', err);
-        aiBody.innerHTML = `⚠️ Failed: ${err.message}`;
+        aiBody.textContent = `⚠️ Failed: ${err.message}`;
         aiBubble.classList.remove('streaming');
     } finally {
         els.chatInput.disabled = false;
         els.chatSendBtn.disabled = false;
         els.chatInput.focus();
-        // Ensure cursor is gone
         const cursor = aiBubble.querySelector('.typing-cursor');
         if (cursor) cursor.remove();
     }
 }
 
-/** Lightweight markdown renderer: **bold**, *italic*, newlines */
-function renderChatMarkdown(text) {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        .replace(/`(.+?)`/g, '<code>$1</code>')
-        .replace(/\n/g, '<br>');
-}
+/* ------------------------------------------------------------------ *
+ * 10. PDF REPORT
+ * ------------------------------------------------------------------ */
 
-
-// 10. PDF DIAGNOSTICS REPORT COMPILING
 async function compilePdfDiagnosticsReport() {
     if (!appState.activeSessionId) return;
-    
+
     els.generatePdfBtn.disabled = true;
     els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Compiling PDF...';
-    
+
     try {
-        const response = await fetch(`/api/sessions/${appState.activeSessionId}/pdf`, {
+        const response = await apiFetch(`/api/sessions/${appState.activeSessionId}/pdf`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(llmPayload())
         });
-        
+
         const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'PDF compilation failed');
-        }
-        
-        // Update Export Card UI
+        if (!response.ok) throw new Error(data.error || 'PDF compilation failed');
+
         els.generatePdfBtn.classList.add('hidden');
-        els.downloadPdfLink.setAttribute('href', data.pdf_url);
+        els.downloadPdfLink.setAttribute('href', withToken(data.pdf_url));
         els.downloadPdfLink.classList.remove('hidden');
-        
-        // Reload active session details to draw the downloaded PDF chat bubble confirmations
         await selectSession(appState.activeSessionId);
-        
     } catch (err) {
         console.error(err);
         alert(err.message);
@@ -1278,8 +1582,4 @@ async function compilePdfDiagnosticsReport() {
         els.generatePdfBtn.disabled = false;
         els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-gears"></i> Compile PDF Report';
     }
-}
-
-function initSidebarHistory() {
-    // Styling/scrolling helpers
 }
