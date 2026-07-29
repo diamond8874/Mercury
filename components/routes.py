@@ -1,81 +1,187 @@
+"""
+All REST + SSE endpoints, grouped by pipeline stage.
+
+Stage order the UI follows:
+
+    POST /api/upload                     -> reads the file, starts profiling
+    GET  /api/sessions/<id>/status       -> "profiling" ... "profile_ready"
+    POST /api/analyze                    -> only once the user submits a goal
+    GET  /api/sessions/<id>/status       -> "analyzing" -> "analyze_done"
+                                            -> "processing" -> "done"
+
+No endpoint hardcodes a model or vendor: connection settings arrive per request
+(``api_key`` / ``provider`` / ``model`` / ``base_url``) and are resolved by
+``services.llm_provider``.
+"""
+
 import os
 import uuid
 import json
 import logging
 import datetime
 import threading
-from flask import Blueprint, request, jsonify, send_from_directory, current_app, Response, stream_with_context
+
+from flask import (Blueprint, request, jsonify, send_from_directory,
+                   current_app, Response, stream_with_context)
 from werkzeug.utils import secure_filename
 import pandas as pd
-import numpy as np
 
 # Services
-from services.ai_service import get_openai_client
+from services.llm_provider import (
+    get_llm_client,
+    llm_options_from_request,
+    provider_catalog,
+    resolve_llm_config,
+)
+from services.profile_service import (
+    read_dataset,
+    build_profile,
+    run_background_profile,
+)
+from services.chart_service import (
+    build_chart_payload,
+    generate_ai_charts,
+    render_chart_images,
+    validate_chart_specs,
+)
 from services.data_service import (
-    summarize_schema,
-    generate_mock_recommendations,
-    generate_mock_charts,
-    run_background_process
+    apply_actions,
+    generate_recommendations,
+    run_analysis_job,
+    run_background_process,
 )
 
 # Utils
 from utils.helpers import allowed_file, parse_json_response
 from utils.session_manager import load_session, save_session
-from utils.fonts import download_lora_fonts
-from utils.job_tracker import _set_job_state, _get_job_state
-
-# Matplotlib & PDF generation imports
-import matplotlib
-matplotlib.use('Agg')  # Set non-interactive backend for server safety
-import matplotlib.pyplot as plt
+from utils.job_tracker import (
+    _get_job_state,
+    _set_job_state,
+    clear_profile_ready,
+    reset_job,
+)
 
 try:
     from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, PageBreak
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                    TableStyle, Image, PageBreak)
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
     from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
     reportlab_installed = True
 except ImportError:
     reportlab_installed = False
 
-# Initialize blueprint
 api_blueprint = Blueprint('api', __name__)
+
+# Chat markers the model may append; they are stripped before display.
+SCHEMA_MARKER_START, SCHEMA_MARKER_END = "<<<SCHEMA_UPDATES>>>", "<<<END>>>"
+CHART_MARKER_START, CHART_MARKER_END = "<<<CHARTS>>>", "<<<END_CHARTS>>>"
+CHART_INTENT_WORDS = ("chart", "plot", "graph", "visual", "histogram", "scatter",
+                      "pie", "heatmap", "distribution", "correlation")
+
+
+def _spawn(target, *args, **kwargs):
+    """Start a daemon thread bound to the real app object (not the proxy)."""
+    thread = threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True)
+    thread.start()
+    return thread
+
+
+def _app():
+    return current_app._get_current_object()
+
 
 @api_blueprint.route('/')
 def index():
     return send_from_directory('static', 'index.html')
 
-# Session REST Management Endpoints
+
+# ===========================================================================
+# Provider / model configuration
+# ===========================================================================
+
+@api_blueprint.route('/api/providers', methods=['GET'])
+def list_providers():
+    """
+    Catalog of known providers plus whatever the server resolved from its own
+    environment. The settings UI renders its dropdown from this, so adding a
+    provider needs no front-end change.
+    """
+    server_default = resolve_llm_config()
+    return jsonify({
+        "providers": provider_catalog(),
+        "server_default": server_default.public_dict(),
+        "notes": "Any OpenAI-compatible endpoint works. Pick 'custom' and supply base_url for anything not listed.",
+    })
+
+
+@api_blueprint.route('/api/llm/verify', methods=['POST'])
+def verify_llm():
+    """Round-trip a tiny prompt so the user can confirm their key works."""
+    data = request.json or {}
+    client = get_llm_client(**llm_options_from_request(data))
+    result = client.verify()
+    return jsonify(result), (200 if result.get("ok") else 400)
+
+
+@api_blueprint.route('/api/llm/models', methods=['POST'])
+def list_llm_models():
+    """List the models the supplied key can reach, when the provider exposes them."""
+    data = request.json or {}
+    client = get_llm_client(**llm_options_from_request(data))
+    try:
+        models = client.list_models()
+        return jsonify({
+            "provider": client.provider,
+            "current_model": client.model,
+            "models": models,
+        })
+    except Exception as exc:  # noqa: BLE001 - listing is optional everywhere
+        return jsonify({
+            "provider": client.provider,
+            "current_model": client.model,
+            "models": [],
+            "error": str(exc)[:300],
+        }), 200
+
+
+# ===========================================================================
+# Session CRUD
+# ===========================================================================
+
 @api_blueprint.route('/api/sessions', methods=['GET'])
 def list_sessions():
     sessions = []
     session_folder = current_app.config['SESSION_FOLDER']
     for name in os.listdir(session_folder):
-        if name.endswith('.json'):
-            path = os.path.join(session_folder, name)
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    sessions.append({
-                        "session_id": data.get("session_id"),
-                        "name": data.get("name"),
-                        "original_filename": data.get("original_filename"),
-                        "goal": data.get("goal"),
-                        "created_at": data.get("created_at")
-                    })
-            except Exception:
-                pass
-    sessions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        # `<id>.job.json` is the job-state mirror, not a session record.
+        if not name.endswith('.json') or name.endswith('.job.json'):
+            continue
+        try:
+            with open(os.path.join(session_folder, name), 'r', encoding='utf-8') as handle:
+                data = json.load(handle)
+            sessions.append({
+                "session_id": data.get("session_id"),
+                "name": data.get("name"),
+                "original_filename": data.get("original_filename"),
+                "goal": data.get("goal"),
+                "created_at": data.get("created_at"),
+            })
+        except Exception:  # noqa: BLE001 - skip unreadable session files
+            pass
+    sessions.sort(key=lambda item: item.get("created_at") or "", reverse=True)
     return jsonify(sessions)
+
 
 @api_blueprint.route('/api/sessions/<session_id>', methods=['GET'])
 def get_session_detail(session_id):
     session_data = load_session(session_id)
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
+    session_data["job"] = _get_job_state(session_id)
     return jsonify(session_data)
+
 
 @api_blueprint.route('/api/sessions/<session_id>', methods=['DELETE'])
 def delete_session(session_id):
@@ -83,121 +189,184 @@ def delete_session(session_id):
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
 
-    try:
-        if session_data.get("file_id"):
-            upload_path = os.path.join(current_app.config['UPLOAD_FOLDER'], session_data["file_id"])
-            if os.path.exists(upload_path):
-                os.remove(upload_path)
-        if session_data.get("cleaned_filename"):
-            output_path = os.path.join(current_app.config['OUTPUT_FOLDER'], session_data["cleaned_filename"])
-            if os.path.exists(output_path):
-                os.remove(output_path)
-    except Exception as ex:
-        logging.warning(f"Error removing files during session delete: {str(ex)}")
+    for folder_key, filename in (
+        ('UPLOAD_FOLDER', session_data.get("file_id")),
+        ('OUTPUT_FOLDER', session_data.get("cleaned_filename")),
+        ('OUTPUT_FOLDER', session_data.get("pdf_filename")),
+    ):
+        if not filename:
+            continue
+        try:
+            path = os.path.join(current_app.config[folder_key], filename)
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError as exc:
+            logging.warning(f"Could not remove {filename} during session delete: {exc}")
 
-    session_folder = current_app.config['SESSION_FOLDER']
-    path = os.path.join(session_folder, f"{session_id}.json")
+    path = os.path.join(current_app.config['SESSION_FOLDER'], f"{session_id}.json")
     if os.path.exists(path):
         os.remove(path)
+    reset_job(session_id)
     return jsonify({"success": True})
 
-# Refactored Core routes
+
+# ===========================================================================
+# Stage 1 - upload and read the dataset (no AI involved)
+# ===========================================================================
+
 @api_blueprint.route('/api/upload', methods=['POST'])
 def upload_file():
+    """
+    Save the file, return light metadata immediately, and kick off deep
+    profiling in the background.
+
+    Deliberately does **not** call any model: the user has not stated a goal
+    yet, so there is nothing to analyse. The response arrives as soon as the
+    file parses, and profiling continues while the user types.
+    """
     if 'file' not in request.files:
         return jsonify({"error": "No file part in the request"}), 400
 
     file = request.files['file']
     if file.filename == '':
         return jsonify({"error": "No file selected"}), 400
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Unsupported file format. Please upload Excel (.xlsx, .xls) or CSV."}), 400
 
-    if file and allowed_file(file.filename):
-        original_filename = secure_filename(file.filename)
-        unique_id = str(uuid.uuid4())
-        file_ext = original_filename.rsplit('.', 1)[1].lower()
-        saved_filename = f"{unique_id}.{file_ext}"
-        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], saved_filename)
+    original_filename = secure_filename(file.filename)
+    unique_id = str(uuid.uuid4())
+    file_ext = original_filename.rsplit('.', 1)[1].lower()
+    saved_filename = f"{unique_id}.{file_ext}"
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], saved_filename)
+    file.save(file_path)
+    logging.info(f"File saved to {file_path}")
 
-        file.save(file_path)
-        logging.info(f"File saved successfully to {file_path}")
+    try:
+        sheets = ["Default"]
+        if file_ext in ('xlsx', 'xls'):
+            sheets = pd.ExcelFile(file_path).sheet_names
+        df = read_dataset(file_path, file_ext, sheets[0] if file_ext in ('xlsx', 'xls') else None)
 
-        try:
-            sheets = []
-            if file_ext in ['xlsx', 'xls']:
-                xls = pd.ExcelFile(file_path)
-                sheets = xls.sheet_names
-                df = pd.read_excel(file_path, sheet_name=sheets[0])
-            else:
-                df = pd.read_csv(file_path)
-                sheets = ["Default"]
+        num_rows, num_cols = df.shape
+        columns = [{
+            "name": str(col),
+            "type": str(df[col].dtype),
+            "null_count": int(df[col].isnull().sum()),
+            "sample_values": [str(v) for v in df[col].dropna().head(3).tolist()],
+        } for col in df.columns]
+        preview_data = df.head(5).fillna("").astype(str).to_dict(orient='records')
 
-            num_rows, num_cols = df.shape
-            columns = []
+        session_id = str(uuid.uuid4())
+        session_data = {
+            "session_id": session_id,
+            "name": original_filename,
+            "original_filename": original_filename,
+            "file_id": saved_filename,
+            "file_type": file_ext,
+            "sheets": sheets,
+            "sheet_name": sheets[0] if file_ext in ('xlsx', 'xls') else "Default",
+            "row_count": int(num_rows),
+            "col_count": int(num_cols),
+            "columns": columns,
+            "preview": preview_data,
+            "profile": None,
+            "goal": "",
+            "column_actions": {},
+            "chat_history": [{
+                "role": "assistant",
+                "content": (f"I've loaded `{original_filename}` - **{num_rows} rows x {num_cols} columns** - "
+                            "and I'm profiling it in the background right now.<br>"
+                            "Tell me what model you plan to train or what you want to learn from this data, "
+                            "and I'll run the full analysis and build the charts."),
+            }],
+            "charts": [],
+            "cleaned_filename": None,
+            "created_at": datetime.datetime.now().isoformat(),
+        }
+        save_session(session_data)
 
-            for col in df.columns:
-                sample_vals = df[col].dropna().head(3).tolist()
-                sample_vals = [str(x) if isinstance(x, (pd.Timestamp, datetime.datetime, type(pd.NaT))) else x for x in sample_vals]
-                null_count = int(df[col].isnull().sum())
+        # Start reading/profiling straight away, without blocking this response.
+        clear_profile_ready(session_id)
+        _set_job_state(session_id, "profiling", phase="profile", progress=5,
+                       progress_msg="Reading the uploaded dataset...")
+        _spawn(run_background_profile, _app(), session_id, session_data["sheet_name"])
 
-                columns.append({
-                    "name": col,
-                    "type": str(df[col].dtype),
-                    "null_count": null_count,
-                    "sample_values": sample_vals
-                })
+        return jsonify({
+            "session_id": session_id,
+            "file_id": saved_filename,
+            "original_name": original_filename,
+            "file_type": file_ext,
+            "sheets": sheets,
+            "row_count": int(num_rows),
+            "col_count": int(num_cols),
+            "columns": columns,
+            "preview": preview_data,
+            "chat_history": session_data["chat_history"],
+            "profiling": True,
+            "next_step": "Submit a goal to POST /api/analyze to start the AI analysis.",
+        })
 
-            preview_data = df.head(5).fillna("").to_dict(orient='records')
+    except Exception as exc:  # noqa: BLE001
+        logging.error(f"Error parsing uploaded file: {exc}")
+        return jsonify({"error": f"Failed to parse Excel/CSV file: {exc}"}), 500
 
-            # Create fresh session record
-            session_id = str(uuid.uuid4())
-            session_data = {
-                "session_id": session_id,
-                "name": original_filename,
-                "original_filename": original_filename,
-                "file_id": saved_filename,
-                "file_type": file_ext,
-                "sheets": sheets,
-                "row_count": num_rows,
-                "col_count": num_cols,
-                "columns": columns,
-                "preview": preview_data,
-                "goal": "",
-                "column_actions": {},
-                "chat_history": [
-                    {"role": "assistant", "content": f"Hi! I've loaded your dataset: `{original_filename}`. What model do you plan to train, or what is your data analysis goal?"}
-                ],
-                "charts": [],
-                "cleaned_filename": None,
-                "created_at": datetime.datetime.now().isoformat()
-            }
-            save_session(session_data)
 
-            return jsonify({
-                "session_id": session_id,
-                "file_id": saved_filename,
-                "original_name": original_filename,
-                "file_type": file_ext,
-                "sheets": sheets,
-                "row_count": num_rows,
-                "col_count": num_cols,
-                "columns": columns,
-                "preview": preview_data,
-                "chat_history": session_data["chat_history"]
-            })
+@api_blueprint.route('/api/sessions/<session_id>/profile', methods=['GET'])
+def get_session_profile(session_id):
+    """Return the cached dataset profile, or 202 while it is still being built."""
+    session_data = load_session(session_id)
+    if not session_data:
+        return jsonify({"error": "Session not found"}), 404
 
-        except Exception as e:
-            logging.error(f"Error parsing uploaded file: {str(e)}")
-            return jsonify({"error": f"Failed to parse Excel/CSV file: {str(e)}"}), 500
+    profile = session_data.get("profile")
+    if not profile:
+        job = _get_job_state(session_id)
+        return jsonify({"status": job.get("status"), "progress": job.get("progress"),
+                        "message": job.get("progress_msg") or "Profiling in progress."}), 202
+    return jsonify(profile)
 
-    return jsonify({"error": "Unsupported file format. Please upload Excel (.xlsx, .xls) or CSV."}), 400
+
+@api_blueprint.route('/api/sessions/<session_id>/sheet', methods=['POST'])
+def set_active_sheet(session_id):
+    """Switch the active Excel sheet and re-profile it in the background."""
+    session_data = load_session(session_id)
+    if not session_data:
+        return jsonify({"error": "Session not found"}), 404
+
+    sheet_name = (request.json or {}).get("sheet_name") or "Default"
+    if sheet_name not in (session_data.get("sheets") or ["Default"]):
+        return jsonify({"error": f"Unknown sheet '{sheet_name}'"}), 400
+
+    session_data["sheet_name"] = sheet_name
+    session_data["profile"] = None
+    save_session(session_data)
+
+    clear_profile_ready(session_id)
+    _set_job_state(session_id, "profiling", phase="profile", progress=5,
+                   progress_msg=f"Re-reading sheet '{sheet_name}'...")
+    _spawn(run_background_profile, _app(), session_id, sheet_name)
+    return jsonify({"status": "profiling", "sheet_name": sheet_name})
+
+
+# ===========================================================================
+# Stage 2 - analysis, which only starts once the user states a goal
+# ===========================================================================
 
 @api_blueprint.route('/api/analyze', methods=['POST'])
 def analyze_schema():
+    """
+    Start the AI analysis for a stated goal.
+
+    Asynchronous by default: returns ``202`` immediately and the browser polls
+    ``/api/sessions/<id>/status``. The worker waits for background profiling to
+    finish, produces recommendations, then chains into cleaning + charts.
+
+    Pass ``{"wait": true}`` to run it inline and get the recommendations in the
+    response body instead (used by tests and scripted clients).
+    """
     data = request.json or {}
     session_id = data.get("session_id")
-    goal = data.get("goal")
-    api_key = data.get("api_key")
-    sheet_name = data.get("sheet_name", "Default")
+    goal = (data.get("goal") or "").strip()
 
     if not session_id or not goal:
         return jsonify({"error": "Missing session_id or goal in request"}), 400
@@ -206,125 +375,92 @@ def analyze_schema():
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
 
-    session_data["goal"] = goal
-    file_id = session_data["file_id"]
-    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], file_id)
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], session_data.get("file_id", ""))
     if not os.path.exists(file_path):
         return jsonify({"error": "Uploaded file not found"}), 404
 
-    is_mock = (api_key == "MOCK")
-    client = None if is_mock else get_openai_client(api_key)
+    if data.get("sheet_name") and data["sheet_name"] != "Default":
+        session_data["sheet_name"] = data["sheet_name"]
+        save_session(session_data)
 
-    if not is_mock and not client:
-        return jsonify({"error": "Nvidia API key is required. Please set it in the settings panel."}), 400
+    llm_opts = llm_options_from_request(data)
 
+    if data.get("wait"):
+        return _analyze_sync(session_id, session_data, goal, llm_opts, file_path)
+
+    _set_job_state(session_id, "analyzing", phase="analyze", progress=3,
+                   progress_msg="Queued - waiting for the dataset profile...")
+    _spawn(run_analysis_job, _app(), session_id, goal, llm_opts,
+           bool(data.get("chain_process", True)))
+
+    return jsonify({
+        "status": "analyzing",
+        "session_id": session_id,
+        "goal": goal,
+        "poll_url": f"/api/sessions/{session_id}/status",
+        "message": "Analysis started. Poll the status endpoint for progress.",
+    }), 202
+
+
+def _analyze_sync(session_id, session_data, goal, llm_opts, file_path):
+    """Inline analysis path for ``{"wait": true}``."""
     try:
-        file_ext = file_id.rsplit('.', 1)[1].lower()
-        if file_ext in ['xlsx', 'xls']:
-            df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
-        else:
-            df = pd.read_csv(file_path)
+        df = read_dataset(file_path, session_data.get("file_type"),
+                          session_data.get("sheet_name", "Default"))
+        profile = session_data.get("profile") or build_profile(
+            df, sheet_name=session_data.get("sheet_name"))
+        session_data["profile"] = profile
+        session_data["columns"] = profile["columns"]
 
-        if is_mock:
-            recommendations = generate_mock_recommendations(df, goal)
-            # Save mapping to session
-            col_actions = {r["column"]: {"action": r["action"], "reason": r["reason"], "transformation": r["transformation"]} for r in recommendations}
-            session_data["column_actions"] = col_actions
+        llm = get_llm_client(**llm_opts)
+        recommendations, source, warning = generate_recommendations(llm, df, goal, profile)
 
-            intro_msg = f"Goal set: **{goal}**.<br>Using mock offline recommendations. I suggest dropping redundant columns. You can edit the suggestions in the grid."
-            session_data["chat_history"].append({"role": "user", "content": f"My data cleaning goal is: {goal}"})
-            session_data["chat_history"].append({"role": "assistant", "content": intro_msg})
-            save_session(session_data)
+        session_data["goal"] = goal
+        session_data["column_actions"] = {
+            r["column"]: {"action": r["action"], "reason": r["reason"],
+                          "transformation": r["transformation"]}
+            for r in recommendations
+        }
+        session_data["analysis_source"] = source
+        session_data["llm"] = llm.config.public_dict()
 
-            return jsonify({
-                "recommendations": recommendations,
-                "chat_history": session_data["chat_history"]
-            })
+        dropped = [r["column"] for r in recommendations if r["action"] == "drop"]
+        message = (f"Goal set: **{goal}**.<br>I read {profile['shape']['rows']} rows before analysing "
+                   f"and recommend dropping {len(dropped)} column(s). Analysed with {llm.describe}.")
+        if warning:
+            message += f"<br>⚠️ {warning}"
+        session_data["chat_history"].append({"role": "user", "content": f"My data cleaning goal is: {goal}"})
+        session_data["chat_history"].append({"role": "assistant", "content": message})
+        save_session(session_data)
 
-        schema_summary = summarize_schema(df, max_samples=1)
-        prompt = f"""
-You are a brilliant Data Scientist and AI cleaning agent.
-The user wants to prepare a dataset for the following specific Goal:
-"{goal}"
+        payload = {
+            "recommendations": recommendations,
+            "column_actions": session_data["column_actions"],
+            "chat_history": session_data["chat_history"],
+            "source": source,
+            "llm": llm.config.public_dict(),
+        }
+        if warning:
+            payload["warning"] = warning
+        _set_job_state(session_id, "analyze_done", phase="analyze", progress=100,
+                       progress_msg="Recommendations ready.", result=payload)
+        return jsonify(payload)
 
-Here is the dataset schema summary:
-{json.dumps(schema_summary, indent=2)}
+    except Exception as exc:  # noqa: BLE001
+        logging.error(f"Synchronous analysis failed: {exc}")
+        return jsonify({"error": f"AI analysis failed: {exc}"}), 500
 
-Analyze each column and recommend whether to KEEP, DROP, or TRANSFORM it.
-Follow these rules:
-1. Recommend dropping columns that are completely empty, have redundant or duplicate information, consist of random identifiers/hashes (unless key for joins), or are entirely irrelevant to the user's Goal.
-2. Recommend keeping columns that are direct features, logical targets, or highly relevant context for the Goal.
-3. Recommend transforming columns if they contain dates that need parsing, categorical strings that require encoding, or numbers stored as strings, or if they have substantial missing values.
-4. Provide a clear, educational explanation for each recommendation.
 
-Return valid JSON only in this exact structure:
-{{
-  "recommendations": [
-    {{
-      "column": "column_name",
-      "action": "keep" | "drop" | "transform",
-      "reason": "Brief, human-readable reason why this action is recommended.",
-      "transformation": "Description of suggested transformation or null if action is keep or drop"
-    }}
-  ]
-}}
-"""
-        logging.info("Requesting column recommendations from Nvidia GLM-5.2...")
-        try:
-            completion = client.chat.completions.create(
-                model="z-ai/glm-5.2",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                top_p=1,
-                max_tokens=1024,
-                seed=42
-            )
-            response_text = completion.choices[0].message.content
-            ai_data = parse_json_response(response_text)
-
-            recommendations = ai_data.get("recommendations", [])
-            col_actions = {r["column"]: {"action": r["action"], "reason": r["reason"], "transformation": r["transformation"]} for r in recommendations}
-            session_data["column_actions"] = col_actions
-
-            dropped_list = [r["column"] for r in recommendations if r["action"] == 'drop']
-            intro_msg = f"Goal set: **{goal}**.<br>I have completed scanning the dataset. I recommend dropping {len(dropped_list)} irrelevant features (like {', '.join(dropped_list[:2])}...) to prepare for your modeling objective. Let me know if you want to make overrides."
-
-            session_data["chat_history"].append({"role": "user", "content": f"My data cleaning goal is: {goal}"})
-            session_data["chat_history"].append({"role": "assistant", "content": intro_msg})
-            save_session(session_data)
-
-            return jsonify({
-                "recommendations": recommendations,
-                "chat_history": session_data["chat_history"]
-            })
-        except Exception as api_err:
-            logging.error(f"Nvidia API call failed, falling back to mock: {str(api_err)}")
-            recommendations = generate_mock_recommendations(df, goal)
-            col_actions = {r["column"]: {"action": r["action"], "reason": r["reason"], "transformation": r["transformation"]} for r in recommendations}
-            session_data["column_actions"] = col_actions
-
-            fallback_msg = f"Goal set: **{goal}**.<br>⚠️ Nvidia API unavailable. Using offline recommendations fallback."
-            session_data["chat_history"].append({"role": "user", "content": f"My data cleaning goal is: {goal}"})
-            session_data["chat_history"].append({"role": "assistant", "content": fallback_msg})
-            save_session(session_data)
-
-            return jsonify({
-                "recommendations": recommendations,
-                "chat_history": session_data["chat_history"],
-                "warning": f"Nvidia API is currently experiencing issues ({str(api_err)}). Falling back to local offline recommendations."
-            })
-
-    except Exception as e:
-        logging.error(f"Error during AI analysis: {str(e)}")
-        return jsonify({"error": f"AI analysis failed: {str(e)}"}), 500
+# ===========================================================================
+# Stage 3 - cleaning, charts and status
+# ===========================================================================
 
 @api_blueprint.route('/api/process', methods=['POST'])
 def process_dataset():
+    """Synchronous clean + chart build. The UI normally uses the async path."""
     data = request.json or {}
     session_id = data.get("session_id")
     actions = data.get("actions")
-    api_key = data.get("api_key")
-    sheet_name = data.get("sheet_name", "Default")
 
     if not session_id or not actions:
         return jsonify({"error": "Missing session_id or actions in request"}), 400
@@ -333,570 +469,462 @@ def process_dataset():
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
 
-    file_id = session_data["file_id"]
-    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], file_id)
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], session_data.get("file_id", ""))
     if not os.path.exists(file_path):
         return jsonify({"error": "Uploaded file not found"}), 404
 
+    sheet_name = data.get("sheet_name") or session_data.get("sheet_name", "Default")
+
     try:
-        # Load file
-        file_ext = file_id.rsplit('.', 1)[1].lower()
-        if file_ext in ['xlsx', 'xls']:
-            df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
-        else:
-            df = pd.read_csv(file_path)
+        df = read_dataset(file_path, session_data.get("file_type"), sheet_name)
+        session_data["column_actions"] = actions
+        cleaned_df, stats = apply_actions(df, actions)
 
-        initial_shape = df.shape
-        df.columns = df.columns.str.strip()
-
-        columns_to_drop = []
-        columns_to_keep = []
-        transform_actions = []
-
-        session_data["column_actions"] = actions  # Save approved action choices
-
-        for col, col_data in actions.items():
-            action = col_data.get('action')
-            trans = col_data.get('transformation')
-
-            if col not in df.columns:
-                continue
-
-            if action == 'drop':
-                columns_to_drop.append(col)
-            elif action == 'transform':
-                columns_to_keep.append(col)
-                try:
-                    if trans and ('date' in trans.lower() or 'time' in trans.lower()):
-                        df[col] = pd.to_datetime(df[col], errors='coerce')
-                    elif trans and ('numeric' in trans.lower() or 'number' in trans.lower() or 'float' in trans.lower() or 'int' in trans.lower()):
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                        if 'impute' in trans.lower() or 'fill' in trans.lower() or 'missing' in trans.lower():
-                            df[col] = df[col].fillna(df[col].median())
-                    elif pd.api.types.is_numeric_dtype(df[col]):
-                        if df[col].isnull().any():
-                            df[col] = df[col].fillna(df[col].median())
-                    else:
-                        if df[col].isnull().any():
-                            df[col] = df[col].fillna("Unknown")
-                    transform_actions.append(f"Transformed '{col}': {trans or 'imputed missing values'}")
-                except Exception as ex:
-                    logging.warning(f"Failed to transform column {col}: {str(ex)}")
-                    transform_actions.append(f"Failed to transform '{col}': {str(ex)}")
-            else:
-                columns_to_keep.append(col)
-                try:
-                    if pd.api.types.is_numeric_dtype(df[col]):
-                        if df[col].isnull().any():
-                            df[col] = df[col].fillna(df[col].median())
-                    else:
-                        if df[col].isnull().any():
-                            df[col] = df[col].fillna("Unknown")
-                except Exception:
-                    pass
-
-        if columns_to_drop:
-            df = df.drop(columns=columns_to_drop)
-
-        final_shape = df.shape
-
-        # Save to output Excel
-        output_filename = f"cleaned_{file_id.split('.')[0]}.xlsx"
+        output_filename = f"cleaned_{str(session_data['file_id']).split('.')[0]}.xlsx"
         output_path = os.path.join(current_app.config['OUTPUT_FOLDER'], output_filename)
-        df.to_excel(output_path, index=False)
-        logging.info(f"Cleaned dataset saved to {output_path}")
-
+        cleaned_df.to_excel(output_path, index=False)
         session_data["cleaned_filename"] = output_filename
 
-        stats = {
-            "initial_rows": initial_shape[0],
-            "initial_cols": initial_shape[1],
-            "final_rows": final_shape[0],
-            "final_cols": final_shape[1],
-            "dropped_columns": columns_to_drop,
-            "transformations_applied": transform_actions
-        }
+        llm = get_llm_client(**llm_options_from_request(data))
+        chart_specs, chart_source = generate_ai_charts(llm, cleaned_df, session_data.get("goal"))
+        rendered_charts = build_chart_payload(cleaned_df, chart_specs)
+        session_data["charts"] = chart_specs
+        session_data["chart_source"] = chart_source
 
-        # Do not generate visualizations during clean processing. Visualizations will be requested separately.
-        session_data["charts"] = []
-        rendered_charts = []
-        charts = []  # Explicitly defined to prevent NameError in refactored code
-        for chart in charts:
-            chart_type = chart.get("chart_type")
-            title = chart.get("title")
-            x_col = chart.get("x_axis")
-            y_col = chart.get("y_axis")
-            desc = chart.get("description")
-
-            if x_col not in df.columns:
-                continue
-
-            chart_item = {
-                "chart_type": chart_type,
-                "title": title,
-                "description": desc,
-                "x_axis": x_col,
-                "y_axis": y_col,
-                "data": []
-            }
-
-            try:
-                if chart_type == 'histogram':
-                    value_counts = df[x_col].value_counts().head(10)
-                    chart_item["labels"] = [str(x) for x in value_counts.index]
-                    chart_item["values"] = [int(v) for v in value_counts.values]
-                elif chart_type == 'pie':
-                    value_counts = df[x_col].value_counts().head(6)
-                    chart_item["labels"] = [str(x) for x in value_counts.index]
-                    chart_item["values"] = [int(v) for v in value_counts.values]
-                elif chart_type == 'scatter' and y_col in df.columns:
-                    temp_df = df[[x_col, y_col]].dropna().head(100)
-                    chart_item["points"] = [{"x": float(row[x_col]) if pd.api.types.is_numeric_dtype(df[x_col]) else str(row[x_col]),
-                                             "y": float(row[y_col]) if pd.api.types.is_numeric_dtype(df[y_col]) else str(row[y_col])}
-                                            for _, row in temp_df.iterrows()]
-                elif chart_type == 'line' and y_col in df.columns:
-                    temp_df = df[[x_col, y_col]].dropna().sort_values(by=x_col).head(50)
-                    chart_item["labels"] = [str(x) for x in temp_df[x_col]]
-                    chart_item["values"] = [float(y) if pd.api.types.is_numeric_dtype(df[y_col]) else str(y) for y in temp_df[y_col]]
-                elif chart_type == 'bar':
-                    if y_col in df.columns:
-                        if df[x_col].nunique() < 15:
-                            grouped = df.groupby(x_col)[y_col].mean().head(15)
-                            chart_item["labels"] = [str(x) for x in grouped.index]
-                            chart_item["values"] = [float(v) for v in grouped.values]
-                            chart_item["title"] = f"{title} (Average)"
-                        else:
-                            temp_df = df[[x_col, y_col]].dropna().head(15)
-                            chart_item["labels"] = [str(x) for x in temp_df[x_col]]
-                            chart_item["values"] = [float(y) if pd.api.types.is_numeric_dtype(df[y_col]) else str(y) for y in temp_df[y_col]]
-                    else:
-                        value_counts = df[x_col].value_counts().head(15)
-                        chart_item["labels"] = [str(x) for x in value_counts.index]
-                        chart_item["values"] = [int(v) for v in value_counts.values]
-
-                rendered_charts.append(chart_item)
-            except Exception as chart_data_ex:
-                logging.warning(f"Error computing data for chart {title}: {str(chart_data_ex)}")
-
-        preview_data = df.head(10).fillna("").to_dict(orient='records')
-
-        # Append chat confirmation
-        confirm_msg = f"Excellent! I've clean-processed the dataset. It has been reduced from **{initial_shape[1]}** features to **{final_shape[1]}** signals. You can download the clean file or view the charts on the right dashboard tabs."
-        session_data["chat_history"].append({"role": "assistant", "content": confirm_msg})
-        save_session(session_data)
-
-        return jsonify({
-            "success": True,
+        preview_data = cleaned_df.head(10).fillna("").astype(str).to_dict(orient='records')
+        result = {
             "download_url": f"/api/download/{output_filename}",
             "stats": stats,
             "charts": rendered_charts,
             "preview": preview_data,
-            "chat_history": session_data["chat_history"]
+            "chart_source": chart_source,
+        }
+        session_data["bg_result"] = result
+        session_data["chat_history"].append({
+            "role": "assistant",
+            "content": (f"Cleaning complete: **{stats['initial_cols']}** features reduced to "
+                        f"**{stats['final_cols']}** signals, and I built {len(rendered_charts)} chart(s). "
+                        "Download the clean file or open the Visualizations tab."),
         })
+        save_session(session_data)
+        _set_job_state(session_id, "done", phase="process", result=result,
+                       progress=100, progress_msg="Done!")
 
-    except Exception as e:
-        logging.error(f"Error processing dataset: {str(e)}")
-        return jsonify({"error": f"Failed to clean and process dataset: {str(e)}"}), 500
+        return jsonify({"success": True, "chat_history": session_data["chat_history"], **result})
 
-# Trigger background processing (called by frontend after analyze or chat schema change)
+    except Exception as exc:  # noqa: BLE001
+        logging.error(f"Error processing dataset: {exc}")
+        return jsonify({"error": f"Failed to clean and process dataset: {exc}"}), 500
+
+
 @api_blueprint.route('/api/sessions/<session_id>/trigger_process', methods=['POST'])
 def trigger_background_process(session_id):
+    """Re-run cleaning + charts in the background with the current schema actions."""
     data = request.json or {}
-    api_key = data.get("api_key")
-
     session_data = load_session(session_id)
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
 
-    # Store sheet_name in session for the background worker
-    sheet_name = data.get("sheet_name", "Default")
-    session_data["sheet_name"] = sheet_name
-
-    # Save manual grid actions if provided
+    if data.get("sheet_name") and data["sheet_name"] != "Default":
+        session_data["sheet_name"] = data["sheet_name"]
     if "column_actions" in data:
         session_data["column_actions"] = data["column_actions"]
     elif "actions" in data:
         session_data["column_actions"] = data["actions"]
-
     save_session(session_data)
 
-    # Mark as queued and fire thread
-    _set_job_state(session_id, "processing")
-    t = threading.Thread(
-        target=run_background_process,
-        args=(current_app._get_current_object(), session_id, api_key),
-        daemon=True
-    )
-    t.start()
-
+    _set_job_state(session_id, "processing", phase="process", progress=5,
+                   progress_msg="Queued for cleaning...")
+    _spawn(run_background_process, _app(), session_id, None, llm_options_from_request(data))
     return jsonify({"status": "processing", "message": "Background processing started."})
 
-# Poll endpoint — frontend polls this every 2s to detect completion
+
 @api_blueprint.route('/api/sessions/<session_id>/status', methods=['GET'])
 def get_processing_status(session_id):
-    job = _get_job_state(session_id)
-    return jsonify(job)
+    """
+    Poll target for the whole pipeline.
 
-# Conversational Chat Route (non-streaming fallback, kept for compatibility)
+    ``status`` is one of: idle, profiling, profile_ready, analyzing,
+    analyze_done, processing, done, error.
+    """
+    return jsonify(_get_job_state(session_id))
+
+
+@api_blueprint.route('/api/sessions/<session_id>/charts', methods=['POST'])
+def regenerate_charts(session_id):
+    """
+    Rebuild the visualisations for the cleaned dataset.
+
+    Optional ``instruction`` steers the model ("plot age against churn"), and
+    optional ``specs`` lets a client pass explicit chart definitions.
+    """
+    session_data = load_session(session_id)
+    if not session_data:
+        return jsonify({"error": "Session not found"}), 404
+    if not session_data.get("cleaned_filename"):
+        return jsonify({"error": "No cleaned dataset yet. Run the analysis first."}), 400
+
+    cleaned_path = os.path.join(current_app.config['OUTPUT_FOLDER'], session_data["cleaned_filename"])
+    if not os.path.exists(cleaned_path):
+        return jsonify({"error": "Cleaned data file not found"}), 404
+
+    data = request.json or {}
+    df = pd.read_excel(cleaned_path)
+
+    if data.get("specs"):
+        specs = validate_chart_specs(data["specs"], df)
+        source = "manual"
+    else:
+        goal = session_data.get("goal") or ""
+        if data.get("instruction"):
+            goal = f"{goal}. Specifically: {data['instruction']}"
+        llm = get_llm_client(**llm_options_from_request(data))
+        specs, source = generate_ai_charts(llm, df, goal)
+
+    rendered = build_chart_payload(df, specs)
+    session_data["charts"] = specs
+    session_data["chart_source"] = source
+    result = dict(session_data.get("bg_result") or {})
+    result["charts"] = rendered
+    session_data["bg_result"] = result
+    save_session(session_data)
+
+    return jsonify({"charts": rendered, "specs": specs, "source": source})
+
+
+# ===========================================================================
+# Chat
+# ===========================================================================
+
+def _schema_context(session_data):
+    context = []
+    for column in session_data.get("columns", []):
+        name = column["name"]
+        action = session_data.get("column_actions", {}).get(
+            name, {"action": "keep", "reason": "Default", "transformation": None})
+        context.append({
+            "column": name,
+            "type": column.get("type"),
+            "kind": column.get("semantic_type"),
+            "null_pct": column.get("null_pct", column.get("null_count")),
+            "sample_values": column.get("sample_values", []),
+            "current_action": action.get("action"),
+            "transformation": action.get("transformation"),
+        })
+    return context
+
+
+def _chat_system_prompt(session_data, streaming):
+    profile = session_data.get("profile") or {}
+    shape = profile.get("shape", {})
+    prompt = f"""You are an expert Data Scientist and AI cleaning assistant working on a real dataset.
+
+Goal: "{session_data.get('goal') or 'not stated yet'}"
+Dataset: {shape.get('rows', '?')} rows x {shape.get('cols', '?')} columns, {profile.get('missing_pct', '?')}% missing cells.
+
+Current columns and chosen actions:
+{json.dumps(_schema_context(session_data), indent=2, default=str)[:6000]}
+"""
+    if streaming:
+        prompt += f"""
+If the user asks for schema changes, append this block at the very end:
+{SCHEMA_MARKER_START}
+{{"column_name": {{"action": "drop|keep|transform", "reason": "...", "transformation": "... or null"}}}}
+{SCHEMA_MARKER_END}
+
+If the user asks for a chart, plot or visualisation, append this block at the very end:
+{CHART_MARKER_START}
+{{"charts": [{{"chart_type": "histogram|bar|pie|line|scatter|box|correlation", "title": "...",
+              "x_axis": "ExactColumn", "y_axis": "ExactColumn or null", "description": "..."}}]}}
+{CHART_MARKER_END}
+
+Otherwise reply conversationally and omit both blocks."""
+    else:
+        prompt += """
+When the user asks for a schema change, answer with valid JSON only:
+{"message": "Your human-friendly response.",
+ "schema_updates": {"ExactColumnName": {"action": "keep|drop|transform",
+                                        "reason": "...", "transformation": "... or null"}}}
+If no changes are needed, return empty schema_updates {}."""
+    return prompt
+
+
+def _local_schema_parse(message, session_data):
+    """Rule-based intent parser used whenever no live model is available."""
+    lowered = message.lower()
+    updates = {}
+    for column in session_data.get("columns", []):
+        name = column["name"]
+        if name.lower() not in lowered:
+            continue
+        if any(word in lowered for word in ("drop", "remove", "delete", "eliminate", "exclude")):
+            updates[name] = {"action": "drop", "reason": "Dropped by user request in chat.",
+                             "transformation": None}
+        elif any(word in lowered for word in ("keep", "retain", "include", "add back")):
+            updates[name] = {"action": "keep", "reason": "Kept by user request in chat.",
+                             "transformation": None}
+        elif any(word in lowered for word in ("transform", "convert", "encode", "impute", "parse")):
+            updates[name] = {"action": "transform", "reason": "Transform requested in chat.",
+                             "transformation": "Custom transform requested in chat"}
+    return updates
+
+
+def _wants_charts(message):
+    return any(word in message.lower() for word in CHART_INTENT_WORDS)
+
+
+def _apply_chart_request(session_id, session_data, instruction, llm_opts):
+    """Rebuild charts on request and return the Chart.js payload (or None)."""
+    if not session_data.get("cleaned_filename"):
+        return None
+    cleaned_path = os.path.join(current_app.config['OUTPUT_FOLDER'], session_data["cleaned_filename"])
+    if not os.path.exists(cleaned_path):
+        return None
+    try:
+        df = pd.read_excel(cleaned_path)
+        goal = f"{session_data.get('goal') or ''}. Specifically: {instruction}"
+        llm = get_llm_client(**llm_opts)
+        specs, source = generate_ai_charts(llm, df, goal)
+        session_data["charts"] = specs
+        session_data["chart_source"] = source
+        return build_chart_payload(df, specs)
+    except Exception as exc:  # noqa: BLE001
+        logging.warning(f"Chart request from chat failed: {exc}")
+        return None
+
+
 @api_blueprint.route('/api/sessions/<session_id>/chat', methods=['POST'])
 def chat_session(session_id):
+    """Non-streaming chat. Same capabilities as the SSE route, one JSON response."""
     session_data = load_session(session_id)
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
 
     data = request.json or {}
     message = data.get("message")
-    api_key = data.get("api_key")
-
     if not message:
         return jsonify({"error": "Missing message in request"}), 400
 
-    # Append user message FIRST so it persists even on error
     session_data["chat_history"].append({"role": "user", "content": message})
+    llm_opts = llm_options_from_request(data)
+    llm = get_llm_client(**llm_opts)
 
-    is_mock = (api_key == "MOCK")
-    client = None if is_mock else get_openai_client(api_key)
-
-    def run_local_fallback(msg_lower, current_session):
-        schema_updates = {}
-        columns = [col["name"] for col in current_session["columns"]]
-        for col in columns:
-            if col.lower() in msg_lower:
-                if any(kw in msg_lower for kw in ["drop", "remove", "delete", "eliminate"]):
-                    schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in chat.", "transformation": None}
-                elif any(kw in msg_lower for kw in ["keep", "add", "retain", "include"]):
-                    schema_updates[col] = {"action": "keep", "reason": "Kept by user request in chat.", "transformation": None}
-                elif any(kw in msg_lower for kw in ["transform", "convert", "encode", "impute"]):
-                    schema_updates[col] = {"action": "transform", "reason": "Transform requested in chat.", "transformation": "Custom transform"}
-        return schema_updates
-
-    if is_mock or not client:
-        msg_lower = message.lower()
-        schema_updates = run_local_fallback(msg_lower, session_data)
-
-        if schema_updates:
-            response_msg = f"Done! I've updated the action for **{', '.join(schema_updates.keys())}**. The schema grid on the right has been refreshed."
-            for col, act in schema_updates.items():
-                session_data["column_actions"][col] = act
-        else:
-            response_msg = f"I'm here to help with your goal: **{session_data['goal']}**. You can ask me to keep, drop, or transform any specific column by name."
-
+    def respond(response_msg, schema_updates):
+        for column, action in schema_updates.items():
+            matched = next((c for c in session_data["column_actions"]
+                            if c.lower() == column.lower()), column)
+            session_data["column_actions"][matched] = action
         session_data["chat_history"].append({"role": "assistant", "content": response_msg})
         save_session(session_data)
         return jsonify({
             "message": response_msg,
             "schema_updates": schema_updates,
             "column_actions": session_data["column_actions"],
-            "chat_history": session_data["chat_history"]
+            "chat_history": session_data["chat_history"],
+            "llm": llm.config.public_dict(),
         })
+
+    if not llm.is_live:
+        schema_updates = _local_schema_parse(message, session_data)
+        if schema_updates:
+            response_msg = (f"Done! I've updated **{', '.join(schema_updates.keys())}**. "
+                            "The schema grid on the right has been refreshed.")
+        else:
+            response_msg = (f"I'm here to help with your goal: **{session_data.get('goal') or 'not set yet'}**. "
+                            "Ask me to keep, drop or transform any column by name, or ask for a chart.")
+        return respond(response_msg, schema_updates)
 
     try:
-        schema_context = []
-        for col in session_data["columns"]:
-            name = col["name"]
-            action_data = session_data["column_actions"].get(name, {"action": "keep", "reason": "Default", "transformation": ""})
-            schema_context.append({
-                "column": name,
-                "type": col["type"],
-                "null_count": col["null_count"],
-                "sample_values": col["sample_values"],
-                "current_action": action_data["action"],
-                "reason": action_data.get("reason", ""),
-                "transformation": action_data.get("transformation")
-            })
+        messages = [{"role": "system", "content": _chat_system_prompt(session_data, streaming=False)}]
+        messages += [{"role": turn["role"], "content": turn["content"]}
+                     for turn in session_data["chat_history"][:-1]]
+        messages.append({"role": "user", "content": message})
 
-        # Build conversation messages for the model (proper multi-turn format)
-        messages_for_model = []
-        for turn in session_data["chat_history"][:-1]:  # exclude the just-appended user message
-            messages_for_model.append({"role": turn["role"], "content": turn["content"]})
-
-        system_prompt = f"""You are an expert Data Scientist and AI cleaning assistant.
-The goal is: "{session_data['goal']}"
-
-Current columns and chosen actions:
-{json.dumps(schema_context, indent=2)}
-
-When the user asks for a schema change, answer with valid JSON only in this format:
-{{
-  "message": "Your human-friendly response.",
-  "schema_updates": {{
-    "ExactColumnName": {{
-      "action": "keep" | "drop" | "transform",
-      "reason": "Reason for the change.",
-      "transformation": "Description or null"
-    }}
-  }}
-}}
-If no changes are needed, return empty schema_updates {{}}.
-"""
-
-        messages_for_model.append({"role": "user", "content": f"{system_prompt}\n\nUser message: {message}"})
-
-        logging.info("Sending chat query to Nvidia GLM-5.2...")
-        completion = client.chat.completions.create(
-            model="z-ai/glm-5.2",
-            messages=messages_for_model,
-            temperature=0.2,
-            top_p=1,
-            max_tokens=1024,
-            seed=42
-        )
-        response_text = completion.choices[0].message.content
-
+        response_text = llm.chat(messages, temperature=0.2, max_tokens=1500, json_mode=True)
         try:
-            ai_data = parse_json_response(response_text)
-            response_msg = ai_data.get("message", "I have processed your request.")
-            schema_updates = ai_data.get("schema_updates", {})
-        except Exception:
-            # Model returned plain text instead of JSON – still use it
-            response_msg = response_text.strip()
-            schema_updates = {}
+            parsed = parse_json_response(response_text)
+            response_msg = parsed.get("message", "I have processed your request.")
+            schema_updates = parsed.get("schema_updates", {}) or {}
+        except (ValueError, TypeError, json.JSONDecodeError):
+            response_msg, schema_updates = response_text.strip(), {}
+        return respond(response_msg, schema_updates)
 
-        # Apply schema updates and save
-        for col, col_data in schema_updates.items():
-            # Case-insensitive match for safety
-            matched_col = next((c for c in session_data["column_actions"] if c.lower() == col.lower()), col)
-            session_data["column_actions"][matched_col] = col_data
-
-        session_data["chat_history"].append({"role": "assistant", "content": response_msg})
-        save_session(session_data)
-
-        return jsonify({
-            "message": response_msg,
-            "schema_updates": schema_updates,
-            "column_actions": session_data["column_actions"],
-            "chat_history": session_data["chat_history"]
-        })
-
-    except Exception as e:
-        logging.error(f"Chat API failed: {str(e)}")
-        # Fallback to local parser
-        msg_lower = message.lower()
-        schema_updates = run_local_fallback(msg_lower, session_data)
-        response_msg = f"⚠️ AI API unavailable. Applied local parsing."
+    except Exception as exc:  # noqa: BLE001
+        logging.error(f"Chat call failed: {exc}")
+        schema_updates = _local_schema_parse(message, session_data)
+        response_msg = f"⚠️ {llm.describe} was unavailable. Applied local parsing instead."
         if schema_updates:
             response_msg += f" Updated: **{', '.join(schema_updates.keys())}**."
-            for col, act in schema_updates.items():
-                session_data["column_actions"][col] = act
         else:
-            response_msg += " No column changes detected. Try mentioning a column name with 'drop', 'keep', or 'transform'."
+            response_msg += " Mention a column name with 'drop', 'keep' or 'transform' to make changes."
+        return respond(response_msg, schema_updates)
 
-        session_data["chat_history"].append({"role": "assistant", "content": response_msg})
-        save_session(session_data)
-        return jsonify({
-            "message": response_msg,
-            "schema_updates": schema_updates,
-            "column_actions": session_data["column_actions"],
-            "chat_history": session_data["chat_history"]
-        })
 
-# Streaming Chat Route via Server-Sent Events
 @api_blueprint.route('/api/sessions/<session_id>/chat/stream', methods=['POST'])
 def chat_session_stream(session_id):
+    """
+    Streaming chat over Server-Sent Events.
+
+    Event types emitted:
+      * default (no ``event:`` line) - ``{"token": "..."}`` text deltas
+      * ``schema_updates`` - updated column actions, plus ``trigger_reprocess``
+      * ``charts``         - freshly built Chart.js payloads
+      * ``done``           - ``{"full_message": "..."}``
+    """
     session_data = load_session(session_id)
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
 
     data = request.json or {}
     message = data.get("message", "")
-    api_key = data.get("api_key")
-
     if not message:
         return jsonify({"error": "Missing message"}), 400
 
-    # Save user message immediately so it persists
     session_data["chat_history"].append({"role": "user", "content": message})
     save_session(session_data)
 
-    is_mock = (api_key == "MOCK")
-    client = None if is_mock else get_openai_client(api_key)
+    llm_opts = llm_options_from_request(data)
+    llm = get_llm_client(**llm_opts)
+    app_object = _app()
 
-    def run_local_fallback_stream():
-        """Local rule-based fallback that emits SSE events."""
-        msg_lower = message.lower()
-        schema_updates = {}
-        columns = [col["name"] for col in session_data["columns"]]
-        for col in columns:
-            if col.lower() in msg_lower:
-                if any(kw in msg_lower for kw in ["drop", "remove", "delete", "eliminate"]):
-                    schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in chat.", "transformation": None}
-                elif any(kw in msg_lower for kw in ["keep", "add", "retain", "include"]):
-                    schema_updates[col] = {"action": "keep", "reason": "Kept by user request in chat.", "transformation": None}
-                elif any(kw in msg_lower for kw in ["transform", "convert", "encode", "impute"]):
-                    schema_updates[col] = {"action": "transform", "reason": "Transform requested in chat.", "transformation": "Custom transform"}
-
-        if schema_updates:
-            response_msg = f"Done! I've updated the action for **{', '.join(schema_updates.keys())}**. The schema grid has been refreshed."
-            for col, act in schema_updates.items():
-                session_data["column_actions"][col] = act
-        else:
-            response_msg = f"I'm here to help with your goal: **{session_data['goal']}**. Mention a column name with 'drop', 'keep', or 'transform' to make changes."
-
-        # Emit schema_updates event first
+    def finish(full_message, schema_updates, chart_payload):
+        """Emit the trailing events and persist the turn."""
         trigger = len(schema_updates) > 0
-        yield f"event: schema_updates\ndata: {json.dumps({'schema_updates': schema_updates, 'column_actions': session_data['column_actions'], 'trigger_reprocess': trigger})}\n\n"
+        yield (f"event: schema_updates\ndata: "
+               f"{json.dumps({'schema_updates': schema_updates, 'column_actions': session_data['column_actions'], 'trigger_reprocess': trigger})}\n\n")
+        if chart_payload:
+            yield f"event: charts\ndata: {json.dumps({'charts': chart_payload})}\n\n"
 
-        # Stream the response word by word
-        for word in response_msg.split(' '):
-            yield f"data: {json.dumps({'token': word + ' '})}\n\n"
-
-        # Final done event
-        session_data["chat_history"].append({"role": "assistant", "content": response_msg})
+        session_data["chat_history"].append({"role": "assistant", "content": full_message})
         save_session(session_data)
 
-        # Auto-trigger background re-process if schema changed
         if trigger:
-            t = threading.Thread(
-                target=run_background_process,
-                args=(current_app._get_current_object(), session_id, api_key),
-                daemon=True
-            )
-            t.start()
+            _set_job_state(session_id, "processing", phase="process", progress=5,
+                           progress_msg="Applying your chat changes...")
+            _spawn(run_background_process, app_object, session_id, None, llm_opts)
 
-        yield f"event: done\ndata: {json.dumps({'full_message': response_msg})}\n\n"
+        yield f"event: done\ndata: {json.dumps({'full_message': full_message})}\n\n"
 
-    def run_ai_stream():
-        """Stream from Nvidia GLM-5.2 via SSE, extract schema_updates from full response."""
-        schema_context = []
-        for col in session_data["columns"]:
-            name = col["name"]
-            action_data = session_data["column_actions"].get(name, {"action": "keep", "reason": "Default", "transformation": ""})
-            schema_context.append({
-                "column": name,
-                "type": col["type"],
-                "null_count": col["null_count"],
-                "sample_values": col["sample_values"],
-                "current_action": action_data["action"],
-                "reason": action_data.get("reason", ""),
-                "transformation": action_data.get("transformation")
-            })
+    def offline_stream():
+        schema_updates = _local_schema_parse(message, session_data)
+        for column, action in schema_updates.items():
+            session_data["column_actions"][column] = action
 
-        system_prompt = f"""You are an expert Data Scientist and AI cleaning assistant.
-The goal is: "{session_data['goal']}"
+        chart_payload = None
+        if _wants_charts(message):
+            chart_payload = _apply_chart_request(session_id, session_data, message, llm_opts)
 
-Current columns and chosen actions:
-{json.dumps(schema_context, indent=2)}
+        if schema_updates:
+            response_msg = (f"Done! I've updated **{', '.join(schema_updates.keys())}**. "
+                            "Reprocessing the dataset now.")
+        elif chart_payload:
+            response_msg = f"I rebuilt {len(chart_payload)} chart(s) for you - see the Visualizations tab."
+        else:
+            response_msg = (f"I'm here to help with your goal: **{session_data.get('goal') or 'not set yet'}**. "
+                            "Mention a column with 'drop', 'keep' or 'transform', or ask me for a chart.")
 
-If the user asks for schema updates, include a JSON block at the end only:
-<<<SCHEMA_UPDATES>>>
-{{"column_name": {{"action": "drop|keep|transform", "reason": "...", "transformation": "... or null"}}}}
-<<<END>>>
+        for word in response_msg.split(' '):
+            yield f"data: {json.dumps({'token': word + ' '})}\n\n"
+        yield from finish(response_msg, schema_updates, chart_payload)
 
-If no changes are needed, respond conversationally and omit the block."""
-
-        # Build proper multi-turn messages
-        messages_for_model = [{"role": "system", "content": system_prompt}]
-        # Add prior conversation turns (skip last user msg, we'll add it below)
-        for turn in session_data["chat_history"][:-1]:
-            messages_for_model.append({"role": turn["role"], "content": turn["content"]})
-        messages_for_model.append({"role": "user", "content": message})
+    def live_stream():
+        messages = [{"role": "system", "content": _chat_system_prompt(session_data, streaming=True)}]
+        messages += [{"role": turn["role"], "content": turn["content"]}
+                     for turn in session_data["chat_history"][:-1]]
+        messages.append({"role": "user", "content": message})
 
         full_response = ""
         schema_updates = {}
+        chart_payload = None
+        emitted = 0
 
         try:
-            stream = client.chat.completions.create(
-                model="z-ai/glm-5.2",
-                messages=messages_for_model,
-                temperature=0.3,
-                top_p=1,
-                max_tokens=1024,
-                stream=True
-            )
-
-            for chunk in stream:
-                if not getattr(chunk, "choices", None):
-                    continue
-                if not chunk.choices or not getattr(chunk.choices[0], "delta", None):
-                    continue
-                delta = chunk.choices[0].delta
-                token = getattr(delta, "content", None)
-                if token is None:
-                    continue
-
+            for token in llm.stream_chat(messages, temperature=0.3, max_tokens=1500):
                 full_response += token
+                # Hold back everything from the first marker onwards.
+                visible = full_response.split(SCHEMA_MARKER_START)[0].split(CHART_MARKER_START)[0]
+                if len(visible) > emitted:
+                    yield f"data: {json.dumps({'token': visible[emitted:]})}\n\n"
+                    emitted = len(visible)
 
-                # Don't stream the SCHEMA_UPDATES block to the user
-                if "<<<SCHEMA_UPDATES>>>" not in full_response:
-                    yield f"data: {json.dumps({'token': token})}\n\n"
+            schema_updates = _extract_block(full_response, SCHEMA_MARKER_START, SCHEMA_MARKER_END) or {}
+            for column, action in schema_updates.items():
+                matched = next((c for c in session_data["column_actions"]
+                                if c.lower() == column.lower()), column)
+                session_data["column_actions"][matched] = action
 
-            # Extract schema updates from the full response
-            if "<<<SCHEMA_UPDATES>>>" in full_response and "<<<END>>>" in full_response:
-                parts = full_response.split("<<<SCHEMA_UPDATES>>>")
-                visible_text = parts[0].strip()
-                json_block = parts[1].split("<<<END>>>")[0].strip()
-                try:
-                    schema_updates = json.loads(json_block)
-                    # Apply updates
-                    for col, col_data in schema_updates.items():
-                        matched_col = next((c for c in session_data["column_actions"] if c.lower() == col.lower()), col)
-                        session_data["column_actions"][matched_col] = col_data
-                except Exception as parse_err:
-                    logging.warning(f"Failed to parse schema_updates JSON block: {parse_err}")
-                full_response = visible_text
-            else:
-                full_response = full_response.strip()
+            chart_block = _extract_block(full_response, CHART_MARKER_START, CHART_MARKER_END)
+            if chart_block and chart_block.get("charts"):
+                chart_payload = _apply_explicit_charts(session_data, chart_block["charts"])
+            elif _wants_charts(message) and not schema_updates:
+                chart_payload = _apply_chart_request(session_id, session_data, message, llm_opts)
 
-        except Exception as e:
-            logging.error(f"Streaming chat failed: {str(e)}")
-            # Fallback: local rule parsing
-            msg_lower = message.lower()
-            columns = [col["name"] for col in session_data["columns"]]
-            for col in columns:
-                if col.lower() in msg_lower:
-                    if any(kw in msg_lower for kw in ["drop", "remove", "delete"]):
-                        schema_updates[col] = {"action": "drop", "reason": "Dropped by user in chat (fallback).", "transformation": None}
-                        session_data["column_actions"][col] = schema_updates[col]
-                    elif any(kw in msg_lower for kw in ["keep", "retain", "include"]):
-                        schema_updates[col] = {"action": "keep", "reason": "Kept by user in chat (fallback).", "transformation": None}
-                        session_data["column_actions"][col] = schema_updates[col]
-            full_response = f"⚠️ Streaming API unavailable ({str(e)[:60]}). Changes applied via local rule engine."
+            full_response = full_response.split(SCHEMA_MARKER_START)[0].split(CHART_MARKER_START)[0].strip()
+            if not full_response:
+                full_response = "Updated - see the panel on the right."
+
+        except Exception as exc:  # noqa: BLE001
+            logging.error(f"Streaming chat failed: {exc}")
+            schema_updates = _local_schema_parse(message, session_data)
+            for column, action in schema_updates.items():
+                session_data["column_actions"][column] = action
+            full_response = (f"⚠️ {llm.describe} was unavailable ({str(exc)[:80]}). "
+                             "Changes were applied with the local rule engine.")
             yield f"data: {json.dumps({'token': full_response})}\n\n"
 
-        # Emit schema updates event (even if empty – frontend always listens)
-        trigger = len(schema_updates) > 0
-        yield f"event: schema_updates\ndata: {json.dumps({'schema_updates': schema_updates, 'column_actions': session_data['column_actions'], 'trigger_reprocess': trigger})}\n\n"
+        yield from finish(full_response, schema_updates, chart_payload)
 
-        # Save to session DB
-        session_data["chat_history"].append({"role": "assistant", "content": full_response})
-        save_session(session_data)
-
-        # Auto-trigger background re-process if schema changed
-        if trigger:
-            t = threading.Thread(
-                target=run_background_process,
-                args=(current_app._get_current_object(), session_id, api_key),
-                daemon=True
-            )
-            t.start()
-
-        # Final done event
-        yield f"event: done\ndata: {json.dumps({'full_message': full_response})}\n\n"
-
-    generator = run_local_fallback_stream() if (is_mock or not client) else run_ai_stream()
-
+    generator = offline_stream() if not llm.is_live else live_stream()
     return Response(
         stream_with_context(generator),
         mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no',
-            'Connection': 'keep-alive'
-        }
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no', 'Connection': 'keep-alive'},
     )
 
-# PDF Generation Endpoint
+
+def _extract_block(text, start_marker, end_marker):
+    """Pull a JSON block out of a model response, or return None."""
+    if start_marker not in text:
+        return None
+    tail = text.split(start_marker, 1)[1]
+    body = tail.split(end_marker, 1)[0].strip()
+    try:
+        return parse_json_response(body)
+    except Exception as exc:  # noqa: BLE001
+        logging.warning(f"Could not parse {start_marker} block: {exc}")
+        return None
+
+
+def _apply_explicit_charts(session_data, specs):
+    """Render chart specs the model produced inline during a chat turn."""
+    if not session_data.get("cleaned_filename"):
+        return None
+    cleaned_path = os.path.join(current_app.config['OUTPUT_FOLDER'], session_data["cleaned_filename"])
+    if not os.path.exists(cleaned_path):
+        return None
+    df = pd.read_excel(cleaned_path)
+    valid = validate_chart_specs(specs, df)
+    if not valid:
+        return None
+    session_data["charts"] = valid
+    session_data["chart_source"] = "ai"
+    return build_chart_payload(df, valid)
+
+
+# ===========================================================================
+# Reporting and downloads
+# ===========================================================================
+
 @api_blueprint.route('/api/sessions/<session_id>/pdf', methods=['POST'])
 def create_pdf_report(session_id):
     if not reportlab_installed:
-        return jsonify({"error": "ReportLab library is not properly installed or imported."}), 500
+        return jsonify({"error": "ReportLab is not installed."}), 500
 
     session_data = load_session(session_id)
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
-
     if not session_data.get("cleaned_filename"):
-        return jsonify({"error": "No cleaned file exists for this session. Please apply cleaning rules and process the dataset first."}), 400
+        return jsonify({"error": "No cleaned file exists for this session. Process the dataset first."}), 400
 
     cleaned_path = os.path.join(current_app.config['OUTPUT_FOLDER'], session_data["cleaned_filename"])
     if not os.path.exists(cleaned_path):
@@ -904,263 +932,159 @@ def create_pdf_report(session_id):
 
     try:
         df = pd.read_excel(cleaned_path)
+        registered = pdfmetrics.getRegisteredFontNames()
+        font_regular = 'Lora' if 'Lora' in registered else 'Helvetica'
+        font_bold = 'Lora-Bold' if 'Lora-Bold' in registered else 'Helvetica-Bold'
 
-        # 1. Render Matplotlib charts to file
-        chart_images = []
-        for idx, chart in enumerate(session_data.get("charts", [])):
-            chart_type = chart.get("chart_type")
-            title = chart.get("title")
-            x = chart.get("x_axis")
-            y = chart.get("y_axis")
+        # Charts: reuse the saved plan, or build one now if the session predates it.
+        specs = session_data.get("charts") or []
+        if not specs:
+            llm = get_llm_client(**llm_options_from_request(request.json or {}))
+            specs, _ = generate_ai_charts(llm, df, session_data.get("goal"))
+            session_data["charts"] = specs
+        chart_images = render_chart_images(
+            df, specs, current_app.config['OUTPUT_FOLDER'], session_id,
+            font_name='Lora' if 'Lora' in registered else None)
 
-            if x not in df.columns:
-                continue
-
-            plt.figure(figsize=(6, 3.5))
-
-            # Setup Lora Font if registered, else DejaVu Sans
-            active_font = 'Lora' if 'Lora' in pdfmetrics.getRegisteredFontNames() else 'DejaVu Sans'
-            plt.title(title, fontname=active_font, fontsize=12, fontweight='bold', pad=10)
-
-            try:
-                if chart_type == 'histogram':
-                    df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
-                    plt.ylabel('Frequency')
-                elif chart_type == 'pie':
-                    df[x].dropna().value_counts().head(6).plot(kind='pie', autopct='%1.1f%%', colors=['#6366f1', '#a855f7', '#10b981', '#f59e0b', '#3b82f6'])
-                    plt.ylabel('')
-                elif chart_type == 'scatter' and y in df.columns:
-                    df.dropna(subset=[x, y]).plot(kind='scatter', x=x, y=y, color='#a855f7')
-                elif chart_type == 'line' and y in df.columns:
-                    df.dropna(subset=[x, y]).sort_values(by=x).plot(kind='line', x=x, y=y, color='#6366f1')
-                elif chart_type == 'bar' and y in df.columns:
-                    df.groupby(x)[y].mean().head(12).plot(kind='bar', color='#10b981')
-                    plt.ylabel(f'Avg {y}')
-                else:
-                    df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
-
-                plt.xticks(rotation=45, ha='right', fontsize=8)
-                plt.tight_layout()
-
-                img_filename = f"{session_id}_chart_{idx}.png"
-                img_path = os.path.join(current_app.config['OUTPUT_FOLDER'], img_filename)
-                plt.savefig(img_path, dpi=200)
-                plt.close()
-                chart_images.append((img_path, chart.get("description", "")))
-            except Exception as plot_ex:
-                logging.warning(f"Failed to generate plot for PDF {title}: {str(plot_ex)}")
-                plt.close()
-
-        # 2. Build PDF Document using ReportLab & Lora Font
         pdf_filename = f"report_{session_id}.pdf"
         pdf_path = os.path.join(current_app.config['OUTPUT_FOLDER'], pdf_filename)
-
-        font_regular = 'Lora' if 'Lora' in pdfmetrics.getRegisteredFontNames() else 'Helvetica'
-        font_bold = 'Lora-Bold' if 'Lora-Bold' in pdfmetrics.getRegisteredFontNames() else 'Helvetica-Bold'
-
-        doc = SimpleDocTemplate(pdf_path, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+        doc = SimpleDocTemplate(pdf_path, pagesize=letter, rightMargin=40,
+                                leftMargin=40, topMargin=40, bottomMargin=40)
         styles = getSampleStyleSheet()
 
-        title_style = ParagraphStyle(
-            'DocTitle',
-            parent=styles['Normal'],
-            fontName=font_bold,
-            fontSize=22,
-            leading=26,
-            textColor=colors.HexColor('#0f172a'),
-            spaceAfter=6
-        )
+        def style(name, font, size, leading, color, **kwargs):
+            return ParagraphStyle(name, parent=styles['Normal'], fontName=font, fontSize=size,
+                                  leading=leading, textColor=colors.HexColor(color), **kwargs)
 
-        subtitle_style = ParagraphStyle(
-            'DocSubtitle',
-            parent=styles['Normal'],
-            fontName=font_regular,
-            fontSize=11,
-            leading=15,
-            textColor=colors.HexColor('#64748b'),
-            spaceAfter=20
-        )
+        title_style = style('DocTitle', font_bold, 22, 26, '#0f172a', spaceAfter=6)
+        subtitle_style = style('DocSubtitle', font_regular, 11, 15, '#64748b', spaceAfter=20)
+        h1_style = style('SectionH1', font_bold, 14, 18, '#4f46e5', spaceBefore=12,
+                         spaceAfter=8, keepWithNext=True)
+        body_style = style('DocBody', font_regular, 9.5, 13.5, '#334155', spaceAfter=6)
+        header_style = style('TableHeader', font_bold, 8.5, 10.5, '#ffffff')
+        cell_style = style('TableCell', font_regular, 8.5, 10.5, '#334155')
 
-        h1_style = ParagraphStyle(
-            'SectionH1',
-            parent=styles['Normal'],
-            fontName=font_bold,
-            fontSize=14,
-            leading=18,
-            textColor=colors.HexColor('#4f46e5'),
-            spaceBefore=12,
-            spaceAfter=8,
-            keepWithNext=True
-        )
+        def make_table(rows, widths, header_color):
+            table = Table(rows, colWidths=widths)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(header_color)),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('PADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#f8fafc'), colors.white]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e2e8f0')),
+            ]))
+            return table
 
-        body_style = ParagraphStyle(
-            'DocBody',
-            parent=styles['Normal'],
-            fontName=font_regular,
-            fontSize=9.5,
-            leading=13.5,
-            textColor=colors.HexColor('#334155'),
-            spaceAfter=6
-        )
+        profile = session_data.get("profile") or {}
+        llm_info = session_data.get("llm") or {}
+        engine_label = (f"{llm_info.get('label') or llm_info.get('provider') or 'the offline rule engine'}"
+                        + (f" / {llm_info['model']}" if llm_info.get('model') else ""))
 
-        table_header_style = ParagraphStyle(
-            'TableHeader',
-            parent=styles['Normal'],
-            fontName=font_bold,
-            fontSize=8.5,
-            leading=10.5,
-            textColor=colors.HexColor('#ffffff')
-        )
-
-        table_cell_style = ParagraphStyle(
-            'TableCell',
-            parent=styles['Normal'],
-            fontName=font_regular,
-            fontSize=8.5,
-            leading=10.5,
-            textColor=colors.HexColor('#334155')
-        )
-
-        story = []
-
-        # Cover header
-        story.append(Paragraph("AI-Powered Data Cleansing & Diagnostics Report", title_style))
-        story.append(Paragraph(f"Goal: {session_data['goal']}", subtitle_style))
-        story.append(Spacer(1, 10))
-
-        # Summary
-        story.append(Paragraph("1. Executive Summary", h1_style))
-        summary_text = (
-            f"This diagnostics report details the cleaning operations performed on dataset "
-            f"<b>{session_data['original_filename']}</b>. Guided by user goals and Nvidia GLM-5.2 "
-            f"recommendations, duplicate/redundant structures were dropped, datatypes were normalized, "
-            f"and missing values imputed."
-        )
-        story.append(Paragraph(summary_text, body_style))
-        story.append(Spacer(1, 8))
-
-        # Summary table
-        initial_rows = session_data.get("row_count", 0)
-        initial_cols = len(session_data.get("columns", []))
-        final_rows = len(df)
-        final_cols = len(df.columns)
-
-        metric_data = [
-            [Paragraph("Dimension", table_header_style), Paragraph("Original Dataset", table_header_style), Paragraph("Cleaned Dataset", table_header_style)],
-            [Paragraph("Total Rows", table_cell_style), Paragraph(str(initial_rows), table_cell_style), Paragraph(str(final_rows), table_cell_style)],
-            [Paragraph("Total Features / Columns", table_cell_style), Paragraph(str(initial_cols), table_cell_style), Paragraph(str(final_cols), table_cell_style)],
+        story = [
+            Paragraph("AI-Powered Data Cleansing &amp; Diagnostics Report", title_style),
+            Paragraph(f"Goal: {session_data.get('goal', 'Not specified')}", subtitle_style),
+            Spacer(1, 10),
+            Paragraph("1. Executive Summary", h1_style),
+            Paragraph(
+                f"This report documents the cleaning performed on <b>{session_data['original_filename']}</b>. "
+                f"The dataset was read and profiled before any model was consulted; recommendations were then "
+                f"produced by <b>{engine_label}</b> and applied with Pandas. Redundant structures were dropped, "
+                f"datatypes normalised, and missing values imputed.", body_style),
+            Spacer(1, 8),
         ]
-        metric_table = Table(metric_data, colWidths=[200, 160, 160])
-        metric_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#4f46e5')),
-            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('PADDING', (0,0), (-1,-1), 6),
-            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.HexColor('#f8fafc'), colors.white]),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
-        ]))
-        story.append(metric_table)
+
+        story.append(make_table([
+            [Paragraph("Dimension", header_style), Paragraph("Original", header_style),
+             Paragraph("Cleaned", header_style)],
+            [Paragraph("Total Rows", cell_style),
+             Paragraph(str(profile.get("shape", {}).get("rows", session_data.get("row_count", 0))), cell_style),
+             Paragraph(str(len(df)), cell_style)],
+            [Paragraph("Total Features / Columns", cell_style),
+             Paragraph(str(profile.get("shape", {}).get("cols", len(session_data.get("columns", [])))), cell_style),
+             Paragraph(str(len(df.columns)), cell_style)],
+            [Paragraph("Missing Cells", cell_style),
+             Paragraph(f"{profile.get('missing_pct', 0)}%", cell_style),
+             Paragraph(f"{round(df.isnull().sum().sum() / max(df.size, 1) * 100, 2)}%", cell_style)],
+        ], [200, 160, 160], '#4f46e5'))
         story.append(Spacer(1, 15))
 
-        # Section 2: Actions Table
         story.append(Paragraph("2. Applied Feature Rules", h1_style))
-        schema_data = [
-            [Paragraph("Column", table_header_style), Paragraph("Action", table_header_style), Paragraph("Explanation & Custom Rules", table_header_style)]
-        ]
-        for col, act in session_data.get("column_actions", {}).items():
-            action_lbl = act.get("action", "keep").upper()
-            reason_txt = act.get("reason", "")
-            trans_txt = act.get("transformation")
-            if trans_txt:
-                reason_txt += f" (Transformation: {trans_txt})"
-            schema_data.append([
-                Paragraph(col, table_cell_style),
-                Paragraph(action_lbl, table_cell_style),
-                Paragraph(reason_txt, table_cell_style)
-            ])
-        schema_table = Table(schema_data, colWidths=[120, 80, 320])
-        schema_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0f172a')),
-            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ('PADDING', (0,0), (-1,-1), 5),
-            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.HexColor('#f8fafc'), colors.white]),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
-        ]))
-        story.append(schema_table)
+        schema_rows = [[Paragraph("Column", header_style), Paragraph("Action", header_style),
+                        Paragraph("Explanation &amp; Custom Rules", header_style)]]
+        for column, action in (session_data.get("column_actions") or {}).items():
+            reason = action.get("reason", "")
+            if action.get("transformation"):
+                reason += f" (Transformation: {action['transformation']})"
+            schema_rows.append([Paragraph(str(column), cell_style),
+                                Paragraph(str(action.get("action", "keep")).upper(), cell_style),
+                                Paragraph(reason, cell_style)])
+        story.append(make_table(schema_rows, [120, 80, 320], '#0f172a'))
+        story.append(PageBreak())
 
-        story.append(PageBreak())  # Move description stats & charts to next page
-
-        # Section 3: Stats
         story.append(Paragraph("3. Cleaned Dataset Descriptive Statistics", h1_style))
-        desc_df = df.describe().round(2).reset_index()
-        desc_cols = list(desc_df.columns)
-        if len(desc_cols) > 6:
-            desc_df = desc_df.iloc[:, :6]
-            desc_cols = list(desc_df.columns)
-
-        desc_header = [Paragraph(c, table_header_style) for c in desc_cols]
-        desc_table_data = [desc_header]
-        for _, row in desc_df.iterrows():
-            row_cells = []
-            for c in desc_cols:
-                row_cells.append(Paragraph(str(row[c]), table_cell_style))
-            desc_table_data.append(row_cells)
-
-        col_w = 520 / len(desc_cols)
-        desc_table = Table(desc_table_data, colWidths=[col_w] * len(desc_cols))
-        desc_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#475569')),
-            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ('PADDING', (0,0), (-1,-1), 5),
-            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.HexColor('#f8fafc'), colors.white]),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
-        ]))
-        story.append(desc_table)
+        try:
+            describe = df.describe().round(2).reset_index()
+            if len(describe.columns) > 6:
+                describe = describe.iloc[:, :6]
+            desc_columns = list(describe.columns)
+            desc_rows = [[Paragraph(str(c), header_style) for c in desc_columns]]
+            for _, row in describe.iterrows():
+                desc_rows.append([Paragraph(str(row[c]), cell_style) for c in desc_columns])
+            story.append(make_table(desc_rows, [520 / len(desc_columns)] * len(desc_columns), '#475569'))
+        except Exception as exc:  # noqa: BLE001 - a dataset with no numerics has no describe()
+            story.append(Paragraph(f"No numeric summary available ({exc}).", body_style))
         story.append(Spacer(1, 15))
 
-        # Section 4: Charts
         story.append(Paragraph("4. Diagnostic Visualizations", h1_style))
-        for img_path, desc in chart_images:
-            story.append(Paragraph(desc, body_style))
-            story.append(Spacer(1, 4))
-            story.append(Image(img_path, width=380, height=220))
-            story.append(Spacer(1, 12))
+        if chart_images:
+            for image_path, description in chart_images:
+                if description:
+                    story.append(Paragraph(description, body_style))
+                    story.append(Spacer(1, 4))
+                story.append(Image(image_path, width=380, height=215))
+                story.append(Spacer(1, 12))
+        else:
+            story.append(Paragraph("No visualisations could be generated for this dataset.", body_style))
 
         doc.build(story)
 
-        # Save pdf name to session record
         session_data["pdf_filename"] = pdf_filename
-
-        # Log to chat
-        pdf_chat_msg = f"I've compiled a professional PDF data diagnostics report using the **Lora** font. You can download it directly here: <br><a href='/api/sessions/{session_id}/download_pdf' class='btn btn-emerald' style='margin-top:0.5rem; padding: 0.4rem 1rem; font-size: 0.8rem;'><i class='fa-solid fa-file-pdf'></i> Download PDF Report</a>"
-        session_data["chat_history"].append({"role": "assistant", "content": pdf_chat_msg})
+        session_data["chat_history"].append({
+            "role": "assistant",
+            "content": (f"I've compiled a {len(chart_images)}-figure PDF diagnostics report. "
+                        f"<br><a href='/api/sessions/{session_id}/download_pdf' class='btn btn-emerald' "
+                        "style='margin-top:0.5rem; padding: 0.4rem 1rem; font-size: 0.8rem;'>"
+                        "<i class='fa-solid fa-file-pdf'></i> Download PDF Report</a>"),
+        })
         save_session(session_data)
 
         return jsonify({
             "success": True,
             "pdf_url": f"/api/sessions/{session_id}/download_pdf",
-            "chat_history": session_data["chat_history"]
+            "charts_included": len(chart_images),
+            "chat_history": session_data["chat_history"],
         })
 
-    except Exception as e:
-        logging.error(f"Error compiling PDF: {str(e)}")
-        return jsonify({"error": f"Failed to generate PDF: {str(e)}"}), 500
+    except Exception as exc:  # noqa: BLE001
+        logging.error(f"Error compiling PDF: {exc}")
+        return jsonify({"error": f"Failed to generate PDF: {exc}"}), 500
+
 
 @api_blueprint.route('/api/sessions/<session_id>/download_pdf', methods=['GET'])
 def download_pdf_report(session_id):
     session_data = load_session(session_id)
     if not session_data or not session_data.get("pdf_filename"):
-        return jsonify({"error": "PDF report not found. Please click generate report first."}), 404
+        return jsonify({"error": "PDF report not found. Generate the report first."}), 404
 
     pdf_path = os.path.join(current_app.config['OUTPUT_FOLDER'], session_data["pdf_filename"])
     if not os.path.exists(pdf_path):
         return jsonify({"error": "Report PDF file not found on disk."}), 404
+    return send_from_directory(current_app.config['OUTPUT_FOLDER'],
+                               session_data["pdf_filename"], as_attachment=True)
 
-    return send_from_directory(current_app.config['OUTPUT_FOLDER'], session_data["pdf_filename"], as_attachment=True)
 
 @api_blueprint.route('/api/download/<filename>')
 def download_cleaned_file(filename):
-    safe_filename = secure_filename(filename)
-    return send_from_directory(current_app.config['OUTPUT_FOLDER'], safe_filename, as_attachment=True)
+    return send_from_directory(current_app.config['OUTPUT_FOLDER'],
+                               secure_filename(filename), as_attachment=True)
