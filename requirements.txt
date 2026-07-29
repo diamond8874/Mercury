@@ -1,7 +1,24 @@
-Flask==3.0.3
-pandas==2.2.2
-openpyxl==3.1.5
-openai
-python-dotenv==1.0.1
-matplotlib
-reportlab
+# Minimum versions rather than hard pins: the previously pinned pandas/Flask
+# releases have no wheels for Python 3.13+ and forced a source build.
+Flask>=3.0.3
+pandas>=2.2.2
+numpy>=1.26
+openpyxl>=3.1.5
+python-dotenv>=1.0.1
+matplotlib>=3.8
+reportlab>=4.0
+
+# OpenAI-compatible transport. Covers OpenAI, NVIDIA, Google Gemini, Groq,
+# OpenRouter, DeepSeek, Mistral, Together, Fireworks, xAI, Perplexity,
+# Cerebras, Cohere, Ollama, LM Studio and any other compatible endpoint.
+# Anthropic's native API is spoken over stdlib urllib, so it needs no package.
+openai>=1.40
+
+# Production WSGI server. Waitress is pure-Python and runs on Windows and
+# Linux alike; use gunicorn instead on Linux if you prefer.
+# Run ONE worker process with several threads - see wsgi.py.
+waitress>=3.0
+# gunicorn>=22.0    ; Linux only
+
+# Development / CI
+pytest>=8.0
