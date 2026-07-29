@@ -1,14 +1,34 @@
-import os
-from openai import OpenAI
+"""
+Backwards-compatible thin wrapper over :mod:`services.llm_provider`.
 
-def get_openai_client(request_key=None):
+Historically this module hardcoded an NVIDIA base URL (and a committed API
+key). Mercury is now vendor-neutral, so everything here simply delegates to
+the provider registry. New code should import from ``services.llm_provider``
+directly.
+"""
+
+from services.llm_provider import (  # noqa: F401 - re-exported for callers
+    LLMClient,
+    LLMConfig,
+    LLMError,
+    client_from_request,
+    detect_provider,
+    get_llm_client,
+    llm_options_from_request,
+    provider_catalog,
+    resolve_llm_config,
+)
+
+
+def get_openai_client(request_key=None, provider=None, model=None, base_url=None):
     """
-    Returns an OpenAI client pointing to the Nvidia endpoint.
+    Legacy helper: return a raw OpenAI-SDK client, or ``None`` when the
+    session should run offline (``api_key="MOCK"``, or no key configured).
+
+    Prefer :func:`get_llm_client`, which also supports Anthropic's native API
+    and normalises streaming across providers.
     """
-    api_key = request_key or os.environ.get("NVIDIA_API_KEY") or "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"
-    if api_key == "MOCK":
+    config = resolve_llm_config(request_key, provider, model, base_url)
+    if config.transport != "openai":
         return None
-    return OpenAI(
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=api_key
-    )
+    return LLMClient(config)._openai()
