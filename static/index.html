@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Antigravity DataCleaner - AI-Powered Chat & Analytics</title>
+    <!-- viewport-fit=cover lets the safe-area-inset paddings apply on notched phones -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <title>Mercury DataCleaner - AI-Powered Chat & Analytics</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,13 +18,16 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="app-container">
+    <div class="app-container" id="app-container">
+        <!-- Dims the workspace while the off-canvas sidebar is open on mobile -->
+        <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+
         <!-- Sidebar Navigation & History -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="sidebar">
             <div class="logo-area">
                 <div class="logo-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
                 <div class="logo-text">
-                    <h1>Antigravity</h1>
+                    <h1>Mercury</h1>
                     <span>DataCleaner Pro</span>
                 </div>
             </div>
@@ -31,19 +36,18 @@
             <button class="btn btn-primary new-session-btn" id="new-analysis-btn">
                 <i class="fa-solid fa-plus"></i> New Analysis
             </button>
-            
+
             <!-- History section -->
             <div class="history-section">
                 <h3><i class="fa-solid fa-clock-rotate-left"></i> History</h3>
                 <div class="sessions-list" id="sessions-list">
-                    <!-- Session history items populated dynamically -->
                     <div class="no-history">No past analyses</div>
                 </div>
             </div>
 
             <div class="sidebar-footer">
                 <button class="settings-btn" id="open-settings-btn">
-                    <i class="fa-solid fa-gear"></i> Nvidia API Key
+                    <i class="fa-solid fa-robot"></i> AI Provider &amp; Model
                 </button>
             </div>
         </aside>
@@ -52,31 +56,35 @@
         <main class="workspace">
             <!-- Header bar -->
             <header class="workspace-header">
+                <button class="sidebar-toggle" id="sidebar-toggle" type="button"
+                        aria-label="Toggle sessions menu" aria-controls="sidebar" aria-expanded="false">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
                 <div class="header-title">
-                    <h2 id="workspace-title">Data Upload & Objective</h2>
-                    <p id="workspace-subtitle">Provide your raw dataset file and state what model you plan to train.</p>
+                    <h2 id="workspace-title">Data Upload &amp; Objective</h2>
+                    <p id="workspace-subtitle">Drop a dataset. Mercury reads it immediately and waits for your goal before analysing.</p>
                 </div>
-                
-                <div class="api-key-status" id="api-status">
+
+                <div class="api-key-status" id="api-status" title="Click to change provider">
                     <span class="status-indicator warning"></span>
-                    <span class="status-text">Default Key Active</span>
+                    <span class="status-text">No provider configured</span>
                 </div>
             </header>
 
             <div class="content-area">
-                <!-- STEP 1: UPLOAD AND INITIAL GOAL (Full screen at start) -->
+                <!-- STEP 1: UPLOAD, LIVE READ-OUT AND GOAL -->
                 <section class="step-section active" id="section-step-1">
                     <div class="glass-card upload-card">
                         <div class="drop-zone" id="file-drop-zone">
                             <input type="file" id="file-input" accept=".xlsx, .xls, .csv" class="hidden">
                             <div class="drop-zone-content">
                                 <i class="fa-solid fa-file-excel file-icon"></i>
-                                <h3>Drag & drop your Excel/CSV here</h3>
+                                <h3>Drag &amp; drop your Excel/CSV here</h3>
                                 <p>Supports .xlsx, .xls and .csv (Max 16MB)</p>
                                 <button class="btn btn-secondary select-file-btn">Choose File</button>
                             </div>
                         </div>
-                        
+
                         <div class="uploaded-file-details hidden" id="file-details-container">
                             <div class="file-info-header">
                                 <div class="file-meta">
@@ -90,7 +98,7 @@
                                     <i class="fa-solid fa-trash-can"></i>
                                 </button>
                             </div>
-                            
+
                             <div class="sheet-selector-container hidden" id="sheet-select-wrapper">
                                 <label for="sheet-select">Select Sheet to Process:</label>
                                 <select id="sheet-select" class="form-select"></select>
@@ -98,14 +106,39 @@
                         </div>
                     </div>
 
+                    <!-- LIVE DATASET READ-OUT: filled by background profiling, no AI involved -->
+                    <div class="glass-card readout-card hidden" id="dataset-readout">
+                        <div class="readout-header">
+                            <h3><i class="fa-solid fa-magnifying-glass-chart icon-prefix"></i> Dataset Read-out</h3>
+                            <span class="readout-status" id="readout-status">
+                                <i class="fa-solid fa-circle-notch fa-spin"></i> Reading dataset&hellip;
+                            </span>
+                        </div>
+                        <p class="subtitle">Mercury reads and profiles your file first. No model is called until you state a goal below.</p>
+
+                        <div class="readout-progress">
+                            <div class="readout-progress-fill" id="readout-progress-fill" style="width: 0%;"></div>
+                        </div>
+
+                        <div class="readout-metrics">
+                            <div class="readout-metric"><span class="readout-num" id="readout-rows">-</span><span class="readout-label">Rows</span></div>
+                            <div class="readout-metric"><span class="readout-num" id="readout-cols">-</span><span class="readout-label">Columns</span></div>
+                            <div class="readout-metric"><span class="readout-num" id="readout-missing">-</span><span class="readout-label">Missing cells</span></div>
+                            <div class="readout-metric"><span class="readout-num" id="readout-dupes">-</span><span class="readout-label">Duplicate rows</span></div>
+                        </div>
+
+                        <div class="readout-types" id="readout-types"></div>
+                        <ul class="readout-warnings" id="readout-warnings"></ul>
+                    </div>
+
                     <div class="glass-card goal-card">
                         <h3><i class="fa-solid fa-bullseye icon-prefix"></i> What is your Machine Learning or Analysis goal?</h3>
-                        <p class="subtitle">AI will parse your schema and remove irrelevant data to perfectly align with this goal.</p>
-                        
+                        <p class="subtitle">Once you submit this, Mercury runs the full analysis, cleans the data and builds the charts.</p>
+
                         <div class="goal-input-wrapper">
                             <textarea id="goal-input" placeholder="Example: I want to build a model to predict customer churn based on their payment history, service issues, and demographic data."></textarea>
                         </div>
-                        
+
                         <div class="presets-container">
                             <span class="preset-label">Suggested Goals:</span>
                             <button class="preset-btn" data-goal="Predict house price based on area, bedrooms, and location.">House Price Prediction</button>
@@ -117,9 +150,6 @@
                     <div class="action-footer">
                         <button class="btn btn-primary" id="analyze-data-btn" disabled>
                             Start AI Analysis <i class="fa-solid fa-arrow-right icon-suffix"></i>
-                        </button>
-                        <button class="btn btn-secondary" id="process-data-btn" disabled>
-                            Process Data <i class="fa-solid fa-cogs icon-suffix"></i>
                         </button>
                     </div>
                 </section>
@@ -133,24 +163,19 @@
                                 <h3><i class="fa-solid fa-comments"></i> AI Data Assistant</h3>
                                 <span class="badge" id="chat-session-badge">Session Active</span>
                             </div>
-                            
-                            <!-- Messages scrollable area -->
-                            <div class="chat-messages" id="chat-messages">
-                                <!-- Populated dynamically -->
-                            </div>
-                            
-                            <!-- Suggested chips -->
+
+                            <div class="chat-messages" id="chat-messages"></div>
+
                             <div class="chat-suggestions-wrapper">
                                 <div class="chat-suggestions" id="chat-suggestions">
-                                    <button class="suggestion-chip" data-text="Explain why column Age is kept">Why is Age kept?</button>
+                                    <button class="suggestion-chip" data-text="Why did you drop those columns?">Explain the drops</button>
+                                    <button class="suggestion-chip" data-text="Show me a chart of the target distribution">Plot the target</button>
                                     <button class="suggestion-chip" data-text="Also drop columns containing names">Drop name columns</button>
-                                    <button class="suggestion-chip" data-text="Generate PDF Report">Generate PDF Report</button>
                                 </div>
                             </div>
-                            
-                            <!-- Chat Input bar -->
+
                             <div class="chat-input-wrapper">
-                                <textarea id="chat-input" placeholder="Type a message (e.g. 'Drop Age', 'Make report')..." rows="1"></textarea>
+                                <textarea id="chat-input" placeholder="Type a message (e.g. 'Drop Age', 'Plot fee vs churn')..." rows="1"></textarea>
                                 <button class="btn-icon send-msg-btn" id="chat-send-btn">
                                     <i class="fa-solid fa-paper-plane"></i>
                                 </button>
@@ -159,7 +184,6 @@
 
                         <!-- Right Panel: Workspace Tabs -->
                         <div class="workspace-panel">
-                            <!-- Tabs Bar -->
                             <div class="tabs-bar">
                                 <button class="tab-btn active" data-tab="tab-schema">
                                     <i class="fa-solid fa-gears"></i> Schema Actions
@@ -174,8 +198,7 @@
                                     <i class="fa-solid fa-file-export"></i> Export Report
                                 </button>
                             </div>
-                            
-                            <!-- Tab Content area -->
+
                             <div class="tab-content-area">
                                 <!-- TAB 1: Schema Editor -->
                                 <div class="tab-pane active" id="tab-schema">
@@ -186,13 +209,13 @@
                                             <div class="stat-badge drop-badge"><span class="badge-num" id="rec-drop-cols">0</span><span class="badge-label">Drop</span></div>
                                             <div class="stat-badge transform-badge"><span class="badge-num" id="rec-transform-cols">0</span><span class="badge-label">Trans</span></div>
                                         </div>
-                                        <span class="schema-auto-label"><i class="fa-solid fa-bolt"></i> Auto-processing on change</span>
+                                        <button class="btn btn-secondary btn-compact" id="process-data-btn" disabled>
+                                            <i class="fa-solid fa-rotate"></i> Apply &amp; Reprocess
+                                        </button>
                                     </div>
-                                    <div class="grid-columns" id="columns-recommendation-grid">
-                                        <!-- Column cards populated dynamically -->
-                                    </div>
+                                    <div class="grid-columns" id="columns-recommendation-grid"></div>
                                 </div>
-                                
+
                                 <!-- TAB 2: Clean Preview -->
                                 <div class="tab-pane" id="tab-preview">
                                     <div class="table-scroll-container">
@@ -202,18 +225,15 @@
                                         </table>
                                     </div>
                                 </div>
-                                
+
                                 <!-- TAB 3: Charts -->
                                 <div class="tab-pane" id="tab-viz">
-                                    <div class="charts-grid" id="dashboard-charts-grid">
-                                        <!-- Dynamic canvas items -->
-                                    </div>
+                                    <div class="charts-grid" id="dashboard-charts-grid"></div>
                                 </div>
-                                
+
                                 <!-- TAB 4: Export Center -->
                                 <div class="tab-pane" id="tab-export">
                                     <div class="export-cards-wrapper">
-                                        <!-- Clean Excel Card -->
                                         <div class="glass-card export-card">
                                             <i class="fa-solid fa-file-excel export-icon excel"></i>
                                             <h3>Cleaned Excel Dataset</h3>
@@ -222,12 +242,11 @@
                                                 <i class="fa-solid fa-download"></i> Download Excel
                                             </a>
                                         </div>
-                                        
-                                        <!-- Clean PDF Card -->
+
                                         <div class="glass-card export-card">
                                             <i class="fa-solid fa-file-pdf export-icon pdf"></i>
                                             <h3>Professional Diagnostics Report</h3>
-                                            <p>Generate a professional analytics report in PDF format styled using the <b>Lora</b> font, including tables and Matplotlib diagnostic figures.</p>
+                                            <p>Generate an analytics report in PDF format styled using the <b>Lora</b> font, including tables and Matplotlib diagnostic figures.</p>
                                             <button class="btn btn-emerald" id="generate-pdf-btn">
                                                 <i class="fa-solid fa-gears"></i> Compile PDF Report
                                             </button>
@@ -236,16 +255,12 @@
                                             </a>
                                         </div>
                                     </div>
-                                    
+
                                     <div class="stats-box glass-card" id="process-stats-box">
                                         <h4>Applied Operations Summary</h4>
                                         <div class="stats-flex">
-                                            <div>
-                                                <span>Rows:</span> <b id="stat-final-rows">0</b> <small id="stat-initial-rows"></small>
-                                            </div>
-                                            <div>
-                                                <span>Columns:</span> <b id="stat-final-cols">0</b> <small id="stat-dropped-cols"></small>
-                                            </div>
+                                            <div><span>Rows:</span> <b id="stat-final-rows">0</b> <small id="stat-initial-rows"></small></div>
+                                            <div><span>Columns:</span> <b id="stat-final-cols">0</b> <small id="stat-dropped-cols"></small></div>
                                         </div>
                                     </div>
                                 </div>
@@ -257,26 +272,67 @@
         </main>
     </div>
 
-    <!-- API SETTINGS MODAL -->
+    <!-- AI PROVIDER SETTINGS MODAL -->
     <div class="modal-overlay hidden" id="settings-modal">
-        <div class="glass-card modal-content">
+        <div class="glass-card modal-content modal-wide">
             <div class="modal-header">
-                <h3><i class="fa-solid fa-key"></i> Settings</h3>
+                <h3><i class="fa-solid fa-robot"></i> AI Provider &amp; Model</h3>
                 <button class="btn-icon" id="close-settings-btn"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            
+
             <div class="modal-body">
+                <p class="form-help">
+                    Mercury works with <b>any</b> provider. Paste a key and the provider is detected from its
+                    prefix, or pick one manually. Anything OpenAI-compatible &mdash; including a local Ollama or
+                    LM&nbsp;Studio server &mdash; works via <b>Custom</b> + base URL.
+                </p>
+
                 <div class="form-group">
-                    <label for="settings-api-key">Nvidia API Key:</label>
-                    <p class="form-help">Enter your Nvidia API key to override the default key. Leave empty to use the pre-configured key.</p>
+                    <label for="settings-provider">Provider:</label>
+                    <select id="settings-provider" class="form-select"></select>
+                    <p class="form-help" id="settings-provider-hint">Auto-detect from the key prefix.</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="settings-api-key">API Key:</label>
                     <div class="input-password-wrapper">
-                        <input type="password" id="settings-api-key" placeholder="nvapi-...">
-                        <button class="btn-icon" id="toggle-key-visibility"><i class="fa-solid fa-eye"></i></button>
+                        <input type="password" id="settings-api-key" placeholder="sk-... / sk-ant-... / nvapi-... / AIza... / gsk_...">
+                        <button class="btn-icon" id="toggle-key-visibility" type="button"><i class="fa-solid fa-eye"></i></button>
+                    </div>
+                    <p class="form-help">Stored in your browser only, and sent with each request. Type <code>MOCK</code> to run fully offline with the deterministic rule engine.</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="settings-model">Model:</label>
+                    <div class="input-inline-wrapper">
+                        <input type="text" id="settings-model" list="settings-model-list" placeholder="Leave empty for the provider default">
+                        <datalist id="settings-model-list"></datalist>
+                        <button class="btn btn-secondary btn-compact" id="load-models-btn" type="button">
+                            <i class="fa-solid fa-list"></i> Load
+                        </button>
                     </div>
                 </div>
+
+                <div class="form-group" id="settings-base-url-group">
+                    <label for="settings-base-url">Base URL:</label>
+                    <input type="text" id="settings-base-url" placeholder="https://your-endpoint/v1">
+                    <p class="form-help">Only needed for custom or self-hosted OpenAI-compatible servers.</p>
+                </div>
+
+                <div class="form-group" id="settings-access-token-group">
+                    <label for="settings-access-token">Server access token:</label>
+                    <input type="password" id="settings-access-token" placeholder="Only if this deployment requires one">
+                    <p class="form-help">Required only when the server sets <code>MERCURY_API_TOKEN</code>. Unrelated to your AI provider key.</p>
+                </div>
+
+                <div class="settings-test-result hidden" id="settings-test-result"></div>
             </div>
-            
+
             <div class="modal-footer">
+                <button class="btn btn-secondary" id="test-connection-btn">
+                    <i class="fa-solid fa-plug-circle-check"></i> Test connection
+                </button>
+                <span class="modal-footer-spacer"></span>
                 <button class="btn btn-secondary" id="cancel-settings-btn">Cancel</button>
                 <button class="btn btn-primary" id="save-settings-btn">Save Settings</button>
             </div>
@@ -286,48 +342,40 @@
     <!-- LOADING SPINNER OVERLAY -->
     <div class="loading-overlay hidden" id="global-loader">
         <div class="loader-content">
-            <!-- Wave Loader Animation -->
             <div class="wave-loader">
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
+                <span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span>
+                <span class="wave-bar"></span><span class="wave-bar"></span>
             </div>
-            
-            <h3 id="loader-title">Analyzing data...</h3>
-            <p id="loader-subtitle">Please wait, Nvidia GLM-5.2 is examining your schema.</p>
 
-            <!-- Progressive Progress Bar -->
+            <h3 id="loader-title">Analyzing data...</h3>
+            <p id="loader-subtitle">Please wait, the configured model is examining your schema.</p>
+
             <div class="progress-bar-container">
                 <div class="progress-bar-fill" id="loader-progress-fill" style="width: 0%;"></div>
             </div>
             <div class="progress-bar-percent" id="loader-progress-percent">0%</div>
 
-            <!-- Progressive Steps Tracker -->
             <div class="progress-steps-list">
                 <div class="progress-step-item" id="step-marker-1">
                     <span class="step-dot"></span>
-                    <span class="step-label">Reading & parsing dataset file</span>
+                    <span class="step-label">Reading &amp; profiling the dataset</span>
                 </div>
                 <div class="progress-step-item" id="step-marker-2">
                     <span class="step-dot"></span>
-                    <span class="step-label">Profiling column statistics</span>
+                    <span class="step-label">Consulting the AI model for column actions</span>
                 </div>
                 <div class="progress-step-item" id="step-marker-3">
                     <span class="step-dot"></span>
-                    <span class="step-label">Consulting Nvidia GLM-5.2 AI model</span>
+                    <span class="step-label">Cleaning, imputing and rebuilding the dataset</span>
                 </div>
                 <div class="progress-step-item" id="step-marker-4">
                     <span class="step-dot"></span>
-                    <span class="step-label">Parsing AI response & saving schema</span>
+                    <span class="step-label">Designing and plotting visualisations</span>
                 </div>
             </div>
         </div>
     </div>
 
-
-    <!-- Application Script -->
     <script src="app.js"></script>
 </body>
 </html>
