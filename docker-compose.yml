@@ -1,0 +1,30 @@
+services:
+  mercury:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      ENVIRONMENT: production
+      # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required in production}
+      # Any provider's key - detected from its prefix. Leave unset to run offline.
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      # Uncomment to require X-API-Key on every /api/* call.
+      # MERCURY_API_TOKEN: ${MERCURY_API_TOKEN:-}
+      RETENTION_DAYS: ${RETENTION_DAYS:-7}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-16}
+    volumes:
+      - mercury-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  mercury-data:
