@@ -1,0 +1,9 @@
+.venv
+__pycache__
+venv
+sessions
+output_data
+uploads
+fonts
+.env
+*.pyc
