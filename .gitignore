@@ -1,9 +1,31 @@
-.venv
-__pycache__
-venv
-sessions
-output_data
-uploads
-fonts
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Secrets - never commit a real key
 .env
-*.pyc
+.env.*
+!.env.example
+
+# Runtime data (uploads, cleaned files, reports, session + job state)
+uploads/
+output_data/
+sessions/
+fonts/
+
+# Test artifacts
+test_uploads/
+test_output_data/
+test_sessions/
+test_dirty_data.xlsx
+
+# OS / editor
+desktop.ini
+.DS_Store
+.idea/
+.vscode/
