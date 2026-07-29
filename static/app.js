@@ -64,7 +64,7 @@ const els = {
     recDropCols: document.getElementById('rec-drop-cols'),
     recTransformCols: document.getElementById('rec-transform-cols'),
     columnsRecommendationGrid: document.getElementById('columns-recommendation-grid'),
-    processDataBtn: document.getElementById('process-data-btn'),
+    processDataBtn: document.getElementById('process-data-btn'), // null after button removal; kept for compatibility
     
     // Clean Preview Table
     cleanedPreviewTable: document.getElementById('cleaned-preview-table'),
@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     els.analyzeDataBtn.addEventListener('click', runAiSchemaAnalysis);
     els.processDataBtn.addEventListener('click', executePandasProcess);
     els.generatePdfBtn.addEventListener('click', compilePdfDiagnosticsReport);
-    
+
     // Load past session history lists
     fetchSessionsHistory();
 });
@@ -120,12 +120,37 @@ document.addEventListener('DOMContentLoaded', () => {
 function showLoader(title, subtitle) {
     els.loaderTitle.textContent = title;
     els.loaderSubtitle.textContent = subtitle;
+    
+    // Reset loader progress fill and step dots
+    updateLoaderProgress(0, 1);
+    
     els.globalLoader.classList.remove('hidden');
+}
+
+function updateLoaderProgress(percent, activeStepIndex) {
+    const progressFill = document.getElementById('loader-progress-fill');
+    const progressPercent = document.getElementById('loader-progress-percent');
+    if (progressFill) progressFill.style.width = `${percent}%`;
+    if (progressPercent) progressPercent.textContent = `${percent}%`;
+    
+    // Highlight step markers
+    for (let i = 1; i <= 4; i++) {
+        const marker = document.getElementById(`step-marker-${i}`);
+        if (!marker) continue;
+        if (i < activeStepIndex) {
+            marker.className = 'progress-step-item completed';
+        } else if (i === activeStepIndex) {
+            marker.className = 'progress-step-item active';
+        } else {
+            marker.className = 'progress-step-item';
+        }
+    }
 }
 
 function hideLoader() {
     els.globalLoader.classList.add('hidden');
 }
+
 
 // 1. API KEY SETTINGS MANAGEMENTS
 function updateApiStatus() {
@@ -279,6 +304,9 @@ function startNewAnalysis() {
     // Reset goal
     els.goalInput.value = '';
     els.analyzeDataBtn.disabled = true;
+    if (els.processDataBtn) {
+        els.processDataBtn.disabled = true;
+    }
     
     // Re-verify list item selections
     renderSessionsList();
@@ -491,9 +519,15 @@ function renderLoadedSessionUI() {
             els.generatePdfBtn.classList.remove('hidden');
             els.downloadPdfLink.classList.add('hidden');
         }
+        if (els.processDataBtn) {
+            els.processDataBtn.disabled = false;
+        }
     } else {
         enableTabs(false);
         switchToTab('tab-schema');
+        if (els.processDataBtn) {
+            els.processDataBtn.disabled = true;
+        }
     }
 }
 
@@ -532,13 +566,14 @@ function appendChatBubbleUI(role, content, animate = true) {
     }
 }
 
-// 7. RUN INITIAL SCHEMA ANALYSIS (STEP 1 -> STEP 2)
 async function runAiSchemaAnalysis() {
     const goal = els.goalInput.value.trim();
     if (!goal || !appState.activeSessionId) return;
-    
-    showLoader('AI is Parsing Dataset...', 'Nvidia GLM-5.2 is evaluating columns against your goal.');
-    
+
+    // Show loader IMMEDIATELY — it will now stay open and track REAL backend progress
+    showLoader('AI is Parsing Dataset...', 'Sending to Nvidia GLM-5.2 — tracking progress below.');
+    updateLoaderProgress(5, 1);
+
     try {
         const response = await fetch('/api/analyze', {
             method: 'POST',
@@ -550,27 +585,168 @@ async function runAiSchemaAnalysis() {
                 sheet_name: els.sheetSelect.value || 'Default'
             })
         });
-        
+
         const data = await response.json();
-        
+
         if (!response.ok) {
-            throw new Error(data.error || 'Schema analysis failed');
+            throw new Error(data.error || 'Failed to queue analysis');
         }
-        
-        if (data.warning) {
-            alert(`⚠️ Note: ${data.warning}`);
-        }
-        
-        // Refresh session record from API
-        await selectSession(appState.activeSessionId);
-        
+
+        // Analysis is now running in background — start polling for real progress
+        // The loader stays open and updates itself via startStatusPolling
+        startStatusPolling(appState.activeSessionId, { mode: 'analyze' });
+
     } catch (err) {
+        hideLoader();
         console.error(err);
         alert(err.message);
-    } finally {
-        hideLoader();
+    }
+    // NOTE: we do NOT call hideLoader() here — startStatusPolling will do it when done
+}
+
+
+/** Fire the background process on the server (non-blocking) */
+async function triggerBackgroundProcess() {
+    if (!appState.activeSessionId) return;
+    try {
+        await fetch(`/api/sessions/${appState.activeSessionId}/trigger_process`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                api_key: appState.apiKey,
+                sheet_name: els.sheetSelect ? els.sheetSelect.value || 'Default' : 'Default'
+            })
+        });
+    } catch (err) {
+        console.warn('trigger_process failed:', err);
     }
 }
+
+/** Poll /status every 2s for both analysis and data-processing jobs */
+let _statusPollTimer = null;
+function startStatusPolling(sessionId, opts = {}) {
+    // Cancel any existing poll
+    if (_statusPollTimer) { clearInterval(_statusPollTimer); _statusPollTimer = null; }
+    const mode = opts.mode || 'process'; // 'analyze' | 'process'
+
+    _statusPollTimer = setInterval(async () => {
+        if (!appState.activeSessionId || appState.activeSessionId !== sessionId) {
+            clearInterval(_statusPollTimer); _statusPollTimer = null; return;
+        }
+        try {
+            const res = await fetch(`/api/sessions/${sessionId}/status`);
+            const job = await res.json();
+
+            // ── ANALYZE PHASE ────────────────────────────────────────────────
+            if (job.status === 'analyzing') {
+                const pct = job.progress || 5;
+                const msg = job.progress_msg || 'Consulting Nvidia GLM-5.2...';
+                updateLoaderProgress(pct, _pctToStep(pct));
+                // Update loader subtitle live
+                const subtitle = document.getElementById('loader-subtitle');
+                if (subtitle) subtitle.textContent = msg;
+
+            } else if (job.status === 'analyze_done' && job.result) {
+                clearInterval(_statusPollTimer); _statusPollTimer = null;
+
+                // Flash 100% and close loader
+                updateLoaderProgress(100, 5);
+                await new Promise(r => setTimeout(r, 700));
+                hideLoader();
+
+                if (job.result.warning) console.warn('Analysis warning:', job.result.warning);
+
+                // Refresh session to load schema grid
+                await selectSession(appState.activeSessionId);
+
+                // Auto-trigger background data processing
+                showBgProcessingIndicator(true);
+                await triggerBackgroundProcess();
+                startStatusPolling(appState.activeSessionId, { mode: 'process' });
+
+            // ── PROCESS PHASE ────────────────────────────────────────────────
+            } else if (job.status === 'processing') {
+                const pct = job.progress || 0;
+                const msg = job.progress_msg || 'Updating data in background…';
+
+                const pill = document.getElementById('bg-processing-pill');
+                if (pill) pill.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> (${pct}%) ${msg}`;
+
+                // If loader is somehow still open (edge case) update it too
+                if (!els.globalLoader.classList.contains('hidden')) {
+                    updateLoaderProgress(pct, _pctToStep(pct));
+                }
+
+            } else if (job.status === 'done' && job.result) {
+                clearInterval(_statusPollTimer); _statusPollTimer = null;
+                showBgProcessingIndicator(false);
+
+                const d = job.result;
+                enableTabs(true);
+
+                if (d.stats) {
+                    els.statFinalRows.textContent = d.stats.final_rows;
+                    els.statInitialRows.textContent = `(Original: ${d.stats.initial_rows})`;
+                    els.statFinalCols.textContent = d.stats.final_cols;
+                    els.statDroppedCols.textContent = `(Dropped: ${d.stats.dropped_columns.length})`;
+                }
+
+                if (d.download_url) {
+                    els.downloadBtn.setAttribute('href', d.download_url);
+                    els.downloadBtn.classList.remove('hidden');
+                    els.generatePdfBtn.classList.remove('hidden');
+                    els.downloadPdfLink.classList.add('hidden');
+                }
+
+                if (d.preview) renderTablePreview(d.preview);
+
+                if (d.charts) {
+                    appState.chartInstances.forEach(c => c.destroy());
+                    appState.chartInstances = [];
+                    renderCharts(d.charts);
+                }
+
+                appendChatBubbleUI('assistant',
+                    `✅ Dataset processed. Preview and charts have been updated.`, true);
+
+            } else if (job.status === 'error') {
+                clearInterval(_statusPollTimer); _statusPollTimer = null;
+                showBgProcessingIndicator(false);
+                hideLoader();
+                appendChatBubbleUI('assistant', `⚠️ Error: ${job.error}`, true);
+                console.warn('Job error:', job.error);
+            }
+        } catch (pollErr) {
+            console.warn('Status poll error:', pollErr);
+        }
+    }, 2000);
+}
+
+/** Map a progress % to the step number shown in the loader checklist */
+function _pctToStep(pct) {
+    if (pct < 20) return 1;
+    if (pct < 45) return 2;
+    if (pct < 75) return 3;
+    return 4;
+}
+
+
+/** Show/hide the subtle background processing indicator pill */
+function showBgProcessingIndicator(show) {
+    let pill = document.getElementById('bg-processing-pill');
+    if (!pill) {
+        pill = document.createElement('div');
+        pill.id = 'bg-processing-pill';
+        pill.className = 'bg-processing-pill';
+        pill.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Updating data in background…';
+        // Insert into workspace panel header
+        const wsPanel = document.querySelector('.workspace-panel');
+        if (wsPanel) wsPanel.prepend(pill);
+    }
+    pill.style.display = show ? 'flex' : 'none';
+}
+
+
 
 // Renders schema grid actions
 function renderSchemaActionsGrid() {
@@ -645,6 +821,7 @@ function renderSchemaActionsGrid() {
                 }
                 
                 recalcSummaryCounts();
+                els.processDataBtn.disabled = false;
             });
         });
         
@@ -654,11 +831,32 @@ function renderSchemaActionsGrid() {
             s.column_actions[col.name].transformation = e.target.value;
         });
         
+        // Trigger auto reprocess when user finishes editing transform text (on change or blur or enter)
+        transInput.addEventListener('change', () => {
+            els.processDataBtn.disabled = false;
+        });
+        transInput.addEventListener('blur', () => {
+            els.processDataBtn.disabled = false;
+        });
+        transInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                transInput.blur();
+            }
+        });
+        
         grid.appendChild(card);
     });
     
     recalcSummaryCounts();
 }
+
+/** Triggers background data processing on the server with current manual grid actions */
+async function autoReprocessWithGridState() {
+    // Disabled: do not auto-trigger full processing on every schema change.
+    // Users should press Process Data once they are happy with the schema actions.
+}
+
 
 function recalcSummaryCounts() {
     let keep = 0, drop = 0, trans = 0;
@@ -733,6 +931,8 @@ async function executePandasProcess() {
         
         // Switch to preview tab
         switchToTab('tab-preview');
+
+        appendChatBubbleUI('assistant', '✅ Data cleaning is complete. Ask me what visualization you want next, and I will prepare it for you.', true);
         
     } catch (err) {
         console.error(err);
@@ -913,17 +1113,33 @@ function initChatConsole() {
 async function sendChatUserMessage() {
     const text = els.chatInput.value.trim();
     if (!text || !appState.activeSessionId) return;
-    
-    // Disable inputs
+
+    // Clear and disable inputs
     els.chatInput.value = '';
     els.chatInput.disabled = true;
     els.chatSendBtn.disabled = true;
-    
-    // Append user bubble
+
+    // Show user bubble immediately
     appendChatBubbleUI('user', text, true);
-    
+
+    // Create a streaming AI bubble with a blinking cursor
+    const aiBubble = document.createElement('div');
+    aiBubble.className = 'chat-message assistant streaming';
+    const aiMeta = document.createElement('span');
+    aiMeta.className = 'chat-message-meta';
+    aiMeta.textContent = 'AI Assistant';
+    const aiBody = document.createElement('div');
+    aiBody.className = 'stream-body';
+    aiBody.innerHTML = '<span class="typing-cursor">▋</span>';
+    aiBubble.appendChild(aiMeta);
+    aiBubble.appendChild(aiBody);
+    els.chatMessages.appendChild(aiBubble);
+    els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+
+    let fullText = '';
+
     try {
-        const response = await fetch(`/api/sessions/${appState.activeSessionId}/chat`, {
+        const response = await fetch(`/api/sessions/${appState.activeSessionId}/chat/stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -931,34 +1147,102 @@ async function sendChatUserMessage() {
                 api_key: appState.apiKey
             })
         });
-        
-        const data = await response.json();
-        
+
         if (!response.ok) {
-            throw new Error(data.error || 'Failed to send message');
+            const errData = await response.json();
+            throw new Error(errData.error || 'Stream request failed');
         }
-        
-        // Update local session actions state
-        if (data.column_actions) {
-            appState.sessionData.column_actions = data.column_actions;
-            renderSchemaActionsGrid(); // Re-render grid actions
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete SSE lines from the buffer
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete last line
+
+            let eventType = 'message';
+            for (const line of lines) {
+                if (line.startsWith('event: ')) {
+                    eventType = line.slice(7).trim();
+                } else if (line.startsWith('data: ')) {
+                    const raw = line.slice(6).trim();
+                    if (!raw) continue;
+
+                    try {
+                        const parsed = JSON.parse(raw);
+
+                        if (eventType === 'schema_updates') {
+                            // Apply schema updates to local state (no re-fetch needed)
+                            if (parsed.column_actions) {
+                                appState.sessionData.column_actions = parsed.column_actions;
+                            }
+                            if (parsed.schema_updates && Object.keys(parsed.schema_updates).length > 0) {
+                                renderSchemaActionsGrid();
+                                if (els.processDataBtn) {
+                                    els.processDataBtn.disabled = false;
+                                }
+                            }
+                            // Do not auto-trigger processing from chat updates.
+                            eventType = 'message'; // Reset for next event
+
+                        } else if (eventType === 'done') {
+                            // Finalize bubble — remove cursor, render markdown-ish bold
+                            fullText = parsed.full_message || fullText;
+                            aiBody.innerHTML = renderChatMarkdown(fullText);
+                            aiBubble.classList.remove('streaming');
+                            eventType = 'message';
+
+                        } else {
+                            // Regular token — stream into bubble
+                            if (parsed.token !== undefined) {
+                                fullText += parsed.token;
+                                aiBody.innerHTML = renderChatMarkdown(fullText) + '<span class="typing-cursor">▋</span>';
+                                els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+                            }
+                        }
+                    } catch (parseErr) {
+                        // Non-JSON line (e.g. empty keep-alive), ignore
+                    }
+                } else if (line === '') {
+                    // Blank line = end of SSE event block; reset type
+                    eventType = 'message';
+                }
+            }
         }
-        
-        // Append AI response bubble
-        appendChatBubbleUI('assistant', data.message, true);
-        
-        // Reload details state
-        appState.sessionData = await (await fetch(`/api/sessions/${appState.activeSessionId}`)).json();
-        
+
     } catch (err) {
-        console.error(err);
-        appendChatBubbleUI('assistant', `⚠️ Failed to send message: ${err.message}`, true);
+        console.error('Chat stream error:', err);
+        aiBody.innerHTML = `⚠️ Failed: ${err.message}`;
+        aiBubble.classList.remove('streaming');
     } finally {
         els.chatInput.disabled = false;
         els.chatSendBtn.disabled = false;
         els.chatInput.focus();
+        // Ensure cursor is gone
+        const cursor = aiBubble.querySelector('.typing-cursor');
+        if (cursor) cursor.remove();
     }
 }
+
+/** Lightweight markdown renderer: **bold**, *italic*, newlines */
+function renderChatMarkdown(text) {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>');
+}
+
 
 // 10. PDF DIAGNOSTICS REPORT COMPILING
 async function compilePdfDiagnosticsReport() {

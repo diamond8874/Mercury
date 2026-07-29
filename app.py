@@ -4,6 +4,7 @@ import json
 import logging
 import datetime
 import urllib.request
+import threading
 from flask import Flask, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 import pandas as pd
@@ -50,6 +51,30 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
 
+# Thread-safe background job tracking: {session_id: {"status": ..., "result": ..., "error": ..., "progress": ..., "progress_msg": ...}}
+_bg_jobs_lock = threading.Lock()
+_background_jobs = {}  # session_id -> job state dict
+
+def _set_job_state(session_id, status, result=None, error=None, progress=0, progress_msg=""):
+    with _bg_jobs_lock:
+        _background_jobs[session_id] = {
+            "status": status,
+            "result": result,
+            "error": error,
+            "progress": progress,
+            "progress_msg": progress_msg
+        }
+
+def _update_job_progress(session_id, progress, progress_msg):
+    with _bg_jobs_lock:
+        if session_id in _background_jobs:
+            _background_jobs[session_id]["progress"] = progress
+            _background_jobs[session_id]["progress_msg"] = progress_msg
+
+def _get_job_state(session_id):
+    with _bg_jobs_lock:
+        return _background_jobs.get(session_id, {"status": "idle", "result": None, "error": None, "progress": 0, "progress_msg": ""})
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -76,6 +101,27 @@ def parse_json_response(text):
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     return json.loads(text)
+
+# Schema summarization helper for more compact AI prompts
+def summarize_schema(df, max_samples=1):
+    schema_summary = []
+    num_rows = len(df)
+    for col in df.columns:
+        nulls = int(df[col].isnull().sum())
+        null_pct = round((nulls / num_rows) * 100, 1) if num_rows else 0.0
+        unique_count = int(df[col].nunique(dropna=True))
+        samples = []
+        if max_samples > 0:
+            samples = df[col].dropna().head(max_samples).tolist()
+            samples = [str(s) for s in samples]
+        schema_summary.append({
+            "column_name": col,
+            "data_type": str(df[col].dtype),
+            "null_percentage": null_pct,
+            "unique_values_count": unique_count,
+            "sample_values": samples
+        })
+    return schema_summary
 
 # Local Storage Database Helper Functions
 def load_session(session_id):
@@ -412,45 +458,30 @@ def analyze_schema():
                 "chat_history": session_data["chat_history"]
             })
 
-        schema_summary = []
-        for col in df.columns:
-            nulls = int(df[col].isnull().sum())
-            null_pct = round((nulls / len(df)) * 100, 1)
-            unique_count = int(df[col].nunique())
-            samples = df[col].dropna().head(3).tolist()
-            samples = [str(s) if hasattr(s, 'isoformat') or pd.isna(s) else s for s in samples]
-            
-            schema_summary.append({
-                "column_name": col,
-                "data_type": str(df[col].dtype),
-                "null_percentage": null_pct,
-                "unique_values_count": unique_count,
-                "sample_values": samples
-            })
-            
+        schema_summary = summarize_schema(df, max_samples=1)
         prompt = f"""
 You are a brilliant Data Scientist and AI cleaning agent.
 The user wants to prepare a dataset for the following specific Goal:
 "{goal}"
 
-Here is the schema, quality check, and sample values of the uploaded dataset:
+Here is the dataset schema summary:
 {json.dumps(schema_summary, indent=2)}
 
-Analyze each column systematically and recommend whether to KEEP, DROP, or TRANSFORM it.
-Follow these rules:
+Analyze each column and recommend whether to KEEP, DROP, or TRANSFORM it.
+Follow these rules:t
 1. Recommend dropping columns that are completely empty, have redundant or duplicate information, consist of random identifiers/hashes (unless key for joins), or are entirely irrelevant to the user's Goal.
 2. Recommend keeping columns that are direct features, logical targets, or highly relevant context for the Goal.
-3. Recommend transforming columns if they contain dates that need parsing, categorical strings that require encoding, or numbers stored as strings, or if they have substantial missing values (e.g. suggest imputing missing data).
-4. Provide a clear, educational explanation (reason) for each recommendation to help the user understand why.
+3. Recommend transforming columns if they contain dates that need parsing, categorical strings that require encoding, or numbers stored as strings, or if they have substantial missing values.
+4. Provide a clear, educational explanation for each recommendation.
 
-You must respond with valid JSON matching this exact structure:
+Return valid JSON only in this exact structure:
 {{
   "recommendations": [
     {{
       "column": "column_name",
       "action": "keep" | "drop" | "transform",
       "reason": "Brief, human-readable reason why this action is recommended.",
-      "transformation": "Description of suggested transformation (e.g. 'Impute missing with median' or 'Convert string to date') or null if action is keep or drop"
+      "transformation": "Description of suggested transformation or null if action is keep or drop"
     }}
   ]
 }}
@@ -460,9 +491,9 @@ You must respond with valid JSON matching this exact structure:
             completion = client.chat.completions.create(
                 model="z-ai/glm-5.2",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
+                temperature=0.0,
                 top_p=1,
-                max_tokens=4096,
+                max_tokens=1024,
                 seed=42
             )
             response_text = completion.choices[0].message.content
@@ -603,73 +634,8 @@ def process_dataset():
             "transformations_applied": transform_actions
         }
         
-        # Generate chart recommendations
-        is_mock = (api_key == "MOCK")
-        client = None if is_mock else get_openai_client(api_key)
-        charts = []
-        goal = session_data["goal"]
-        
-        if is_mock or not (client and goal):
-            charts = generate_mock_charts(df)
-        else:
-            cleaned_schema = []
-            for col in df.columns:
-                unique_vals = int(df[col].nunique())
-                samples = df[col].dropna().head(3).tolist()
-                samples = [str(s) if hasattr(s, 'isoformat') or pd.isna(s) else s for s in samples]
-                cleaned_schema.append({
-                    "column_name": col,
-                    "data_type": str(df[col].dtype),
-                    "unique_values_count": unique_vals,
-                    "sample_values": samples
-                })
-                
-            chart_prompt = f"""
-You are an expert Data Visualizer.
-We have successfully cleaned a dataset to achieve this goal:
-"{goal}"
-
-Here is the clean dataset schema:
-{json.dumps(cleaned_schema, indent=2)}
-
-Recommend 3 to 4 highly insightful and beautiful charts/plots that directly support the goal.
-For each chart, specify the chart type, title, X-axis, and Y-axis (or null if not required, like in histograms or pie charts).
-Chart types MUST be one of: "bar", "line", "scatter", "pie", "histogram".
-Use ONLY column names that are present in the clean dataset schema. Do not make up column names.
-
-Respond in valid JSON format matching this exact structure:
-{{
-  "charts": [
-    {{
-      "chart_type": "bar" | "line" | "scatter" | "pie" | "histogram",
-      "title": "Clear, descriptive title for the visualization",
-      "x_axis": "column_name_from_schema",
-      "y_axis": "column_name_from_schema_or_null",
-      "description": "Brief explanation of why this specific visualization helps answer the user's goal."
-    }}
-  ]
-}}
-"""
-            logging.info("Requesting chart suggestions from Nvidia GLM-5.2...")
-            try:
-                completion = client.chat.completions.create(
-                    model="z-ai/glm-5.2",
-                    messages=[{"role": "user", "content": chart_prompt}],
-                    temperature=0.2,
-                    top_p=1,
-                    max_tokens=4096,
-                    seed=42
-                )
-                response_text = completion.choices[0].message.content
-                chart_data = parse_json_response(response_text)
-                charts = chart_data.get("charts", [])
-            except Exception as chart_err:
-                logging.error(f"Failed to generate visualization recommendations, falling back to mock: {str(chart_err)}")
-                charts = generate_mock_charts(df)
-                
-        session_data["charts"] = charts
-        
-        # Compile chart data for frontend render
+        # Do not generate visualizations during clean processing. Visualizations will be requested separately.
+        session_data["charts"] = []
         rendered_charts = []
         for chart in charts:
             chart_type = chart.get("chart_type")
@@ -745,64 +711,268 @@ Respond in valid JSON format matching this exact structure:
         })
         
     except Exception as e:
-        logging.error(f"Error processing dataset: {str(e)}")
+        logging.error(f"Error processing dataset: {str(e)}") 
         return jsonify({"error": f"Failed to clean and process dataset: {str(e)}"}), 500
 
-# Conversational Chat Route
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Background Processing Worker  (used by both initial analysis & chat changes)
+# ─────────────────────────────────────────────────────────────────────────────
+def run_background_process(session_id, api_key=None):
+    """
+    Re-runs the full pandas cleaning + chart generation pipeline using the
+    session's current column_actions.  Saves results to the session JSON so
+    the frontend /status poll can pick them up.
+    """
+    with app.app_context():
+        try:
+            _set_job_state(session_id, "processing", progress=10, progress_msg="Reading raw Excel/CSV dataset...")
+            session_data = load_session(session_id)
+            if not session_data:
+                _set_job_state(session_id, "error", error="Session not found")
+                return
+
+            file_id = session_data.get("file_id")
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], file_id)
+            if not os.path.exists(file_path):
+                _set_job_state(session_id, "error", error="Uploaded file not found")
+                return
+
+            actions = session_data.get("column_actions", {})
+            sheet_name = session_data.get("sheet_name", 0)
+
+            # Load file
+            file_ext = file_id.rsplit('.', 1)[1].lower()
+            if file_ext in ['xlsx', 'xls']:
+                df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name not in ("Default", None) else 0)
+            else:
+                df = pd.read_csv(file_path)
+
+            _update_job_progress(session_id, 30, "Rebuilding dataset structure & applying Keep/Drop columns...")
+            initial_shape = df.shape
+            df.columns = df.columns.str.strip()
+
+
+            columns_to_drop = []
+            transform_actions = []
+
+            for col, col_data in actions.items():
+                action = col_data.get('action')
+                trans = col_data.get('transformation')
+                if col not in df.columns:
+                    continue
+                if action == 'drop':
+                    columns_to_drop.append(col)
+                elif action == 'transform':
+                    try:
+                        if trans and ('date' in trans.lower() or 'time' in trans.lower()):
+                            df[col] = pd.to_datetime(df[col], errors='coerce')
+                        elif trans and any(k in trans.lower() for k in ['numeric', 'number', 'float', 'int']):
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+                            if any(k in trans.lower() for k in ['impute', 'fill', 'missing']):
+                                df[col] = df[col].fillna(df[col].median())
+                        elif pd.api.types.is_numeric_dtype(df[col]):
+                            if df[col].isnull().any():
+                                df[col] = df[col].fillna(df[col].median())
+                        else:
+                            if df[col].isnull().any():
+                                df[col] = df[col].fillna("Unknown")
+                        transform_actions.append(f"Transformed '{col}': {trans or 'imputed'}")
+                    except Exception as tex:
+                        logging.warning(f"BG transform error {col}: {tex}")
+                else:
+                    try:
+                        if pd.api.types.is_numeric_dtype(df[col]):
+                            if df[col].isnull().any():
+                                df[col] = df[col].fillna(df[col].median())
+                        else:
+                            if df[col].isnull().any():
+                                df[col] = df[col].fillna("Unknown")
+                    except Exception:
+                        pass
+
+            _update_job_progress(session_id, 55, "Running Pandas type transformations & data cleaning...")
+            if columns_to_drop:
+                df = df.drop(columns=columns_to_drop)
+
+            final_shape = df.shape
+
+            # Save cleaned Excel
+            output_filename = f"cleaned_{file_id.split('.')[0]}.xlsx"
+            output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
+            df.to_excel(output_path, index=False)
+            session_data["cleaned_filename"] = output_filename
+
+            stats = {
+                "initial_rows": initial_shape[0], "initial_cols": initial_shape[1],
+                "final_rows": final_shape[0], "final_cols": final_shape[1],
+                "dropped_columns": columns_to_drop,
+                "transformations_applied": transform_actions
+            }
+
+            # Skip chart generation during background clean processing.
+            charts = []
+            session_data["charts"] = charts
+
+            # Build rendered chart data
+            rendered_charts = []
+            for chart in charts:
+                chart_type = chart.get("chart_type")
+                title = chart.get("title")
+                x_col = chart.get("x_axis")
+                y_col = chart.get("y_axis")
+                desc = chart.get("description")
+                if x_col not in df.columns:
+                    continue
+                chart_item = {"chart_type": chart_type, "title": title, "description": desc,
+                              "x_axis": x_col, "y_axis": y_col, "data": []}
+                try:
+                    if chart_type == 'histogram':
+                        vc = df[x_col].value_counts().head(10)
+                        chart_item["labels"] = [str(x) for x in vc.index]
+                        chart_item["values"] = [int(v) for v in vc.values]
+                    elif chart_type == 'pie':
+                        vc = df[x_col].value_counts().head(6)
+                        chart_item["labels"] = [str(x) for x in vc.index]
+                        chart_item["values"] = [int(v) for v in vc.values]
+                    elif chart_type == 'scatter' and y_col in df.columns:
+                        tmp = df[[x_col, y_col]].dropna().head(100)
+                        chart_item["points"] = [{"x": float(r[x_col]) if pd.api.types.is_numeric_dtype(df[x_col]) else str(r[x_col]),
+                                                  "y": float(r[y_col]) if pd.api.types.is_numeric_dtype(df[y_col]) else str(r[y_col])} for _, r in tmp.iterrows()]
+                    elif chart_type == 'line' and y_col in df.columns:
+                        tmp = df[[x_col, y_col]].dropna().sort_values(by=x_col).head(50)
+                        chart_item["labels"] = [str(x) for x in tmp[x_col]]
+                        chart_item["values"] = [float(y) if pd.api.types.is_numeric_dtype(df[y_col]) else str(y) for y in tmp[y_col]]
+                    elif chart_type == 'bar':
+                        if y_col and y_col in df.columns:
+                            if df[x_col].nunique() < 15:
+                                grouped = df.groupby(x_col)[y_col].mean().head(15)
+                                chart_item["labels"] = [str(x) for x in grouped.index]
+                                chart_item["values"] = [float(v) for v in grouped.values]
+                                chart_item["title"] = f"{title} (Avg)"
+                            else:
+                                tmp = df[[x_col, y_col]].dropna().head(15)
+                                chart_item["labels"] = [str(x) for x in tmp[x_col]]
+                                chart_item["values"] = [float(y) if pd.api.types.is_numeric_dtype(df[y_col]) else str(y) for y in tmp[y_col]]
+                        else:
+                            vc = df[x_col].value_counts().head(15)
+                            chart_item["labels"] = [str(x) for x in vc.index]
+                            chart_item["values"] = [int(v) for v in vc.values]
+                    rendered_charts.append(chart_item)
+                except Exception as cde:
+                    logging.warning(f"BG chart data error {title}: {cde}")
+
+            _update_job_progress(session_id, 95, "Compiling final table previews, statistics, and reports...")
+            preview_data = df.head(10).fillna("").to_dict(orient='records')
+
+            result_payload = {
+                "download_url": f"/api/download/{output_filename}",
+                "stats": stats,
+                "charts": rendered_charts,
+                "preview": preview_data,
+            }
+            session_data.setdefault("bg_result", {})
+            session_data["bg_result"] = result_payload
+            save_session(session_data)
+
+            _set_job_state(session_id, "done", result=result_payload, progress=100, progress_msg="Done!")
+            logging.info(f"Background process complete for session {session_id}")
+
+        except Exception as ex:
+            logging.error(f"Background process error for {session_id}: {ex}")
+            _set_job_state(session_id, "error", error=str(ex))
+
+
+# Trigger background processing (called by frontend after analyze or chat schema change)
+@app.route('/api/sessions/<session_id>/trigger_process', methods=['POST'])
+def trigger_background_process(session_id):
+    data = request.json or {}
+    api_key = data.get("api_key")
+
+    session_data = load_session(session_id)
+    if not session_data:
+        return jsonify({"error": "Session not found"}), 404
+
+    # Store sheet_name in session for the background worker
+    sheet_name = data.get("sheet_name", "Default")
+    session_data["sheet_name"] = sheet_name
+
+    # Save manual grid actions if provided
+    if "column_actions" in data:
+        session_data["column_actions"] = data["column_actions"]
+    elif "actions" in data:
+        session_data["column_actions"] = data["actions"]
+
+    save_session(session_data)
+
+    # Mark as queued and fire thread
+    _set_job_state(session_id, "processing")
+    t = threading.Thread(target=run_background_process, args=(session_id, api_key), daemon=True)
+    t.start()
+
+    return jsonify({"status": "processing", "message": "Background processing started."})
+
+
+# Poll endpoint — frontend polls this every 2s to detect completion
+@app.route('/api/sessions/<session_id>/status', methods=['GET'])
+def get_processing_status(session_id):
+    job = _get_job_state(session_id)
+    return jsonify(job)
+
+
+# Conversational Chat Route (non-streaming fallback, kept for compatibility)
 @app.route('/api/sessions/<session_id>/chat', methods=['POST'])
 def chat_session(session_id):
     session_data = load_session(session_id)
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
-        
+
     data = request.json or {}
     message = data.get("message")
     api_key = data.get("api_key")
-    
+
     if not message:
         return jsonify({"error": "Missing message in request"}), 400
-        
+
+    # Append user message FIRST so it persists even on error
     session_data["chat_history"].append({"role": "user", "content": message})
-    
+
     is_mock = (api_key == "MOCK")
     client = None if is_mock else get_openai_client(api_key)
-    
-    if is_mock or not client:
-        msg_lower = message.lower()
-        response_msg = ""
+
+    def run_local_fallback(msg_lower, current_session):
         schema_updates = {}
-        
-        modified = False
-        columns = [col["name"] for col in session_data["columns"]]
+        columns = [col["name"] for col in current_session["columns"]]
         for col in columns:
             if col.lower() in msg_lower:
-                if "drop" in msg_lower or "remove" in msg_lower or "delete" in msg_lower:
+                if any(kw in msg_lower for kw in ["drop", "remove", "delete", "eliminate"]):
                     schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in chat.", "transformation": None}
-                    modified = True
-                elif "keep" in msg_lower or "add" in msg_lower:
+                elif any(kw in msg_lower for kw in ["keep", "add", "retain", "include"]):
                     schema_updates[col] = {"action": "keep", "reason": "Kept by user request in chat.", "transformation": None}
-                    modified = True
-                elif "transform" in msg_lower or "convert" in msg_lower:
+                elif any(kw in msg_lower for kw in ["transform", "convert", "encode", "impute"]):
                     schema_updates[col] = {"action": "transform", "reason": "Transform requested in chat.", "transformation": "Custom transform"}
-                    modified = True
-                    
-        if modified:
-            response_msg = f"I've updated the recommendations for the column(s) as requested. You can see the changes in the grid."
+        return schema_updates
+
+    if is_mock or not client:
+        msg_lower = message.lower()
+        schema_updates = run_local_fallback(msg_lower, session_data)
+
+        if schema_updates:
+            response_msg = f"Done! I've updated the action for **{', '.join(schema_updates.keys())}**. The schema grid on the right has been refreshed."
             for col, act in schema_updates.items():
                 session_data["column_actions"][col] = act
         else:
-            response_msg = f"I understand you are working on the goal: '{session_data['goal']}'. Let me know if you would like me to include or exclude any specific features, or if you want to compile a PDF report."
-            
+            response_msg = f"I'm here to help with your goal: **{session_data['goal']}**. You can ask me to keep, drop, or transform any specific column by name."
+
         session_data["chat_history"].append({"role": "assistant", "content": response_msg})
         save_session(session_data)
-        
         return jsonify({
             "message": response_msg,
             "schema_updates": schema_updates,
             "column_actions": session_data["column_actions"],
             "chat_history": session_data["chat_history"]
         })
-        
+
     try:
         schema_context = []
         for col in session_data["columns"]:
@@ -814,102 +984,290 @@ def chat_session(session_id):
                 "null_count": col["null_count"],
                 "sample_values": col["sample_values"],
                 "current_action": action_data["action"],
-                "reason": action_data["reason"],
+                "reason": action_data.get("reason", ""),
                 "transformation": action_data.get("transformation")
             })
-            
-        prompt = f"""
-You are an expert Data Scientist and AI cleaning assistant.
-The user is preparing their dataset for the goal: "{session_data['goal']}"
-Here is the original filename: {session_data['original_filename']}
 
-The current dataset columns and actions are:
+        # Build conversation messages for the model (proper multi-turn format)
+        messages_for_model = []
+        for turn in session_data["chat_history"][:-1]:  # exclude the just-appended user message
+            messages_for_model.append({"role": turn["role"], "content": turn["content"]})
+
+        system_prompt = f"""You are an expert Data Scientist and AI cleaning assistant.
+The goal is: "{session_data['goal']}"
+
+Current columns and chosen actions:
 {json.dumps(schema_context, indent=2)}
 
-Here is the conversation history:
-{json.dumps(session_data["chat_history"][:-1], indent=2)}
-
-The user says: "{message}"
-
-Respond to the user's message in a helpful, concise way.
-If the user requests changes to the column actions (e.g. keeping, dropping, or transforming columns), you must output a structured JSON command along with your message to apply these updates.
-
-You must respond with valid JSON matching this exact structure:
+When the user asks for a schema change, answer with valid JSON only in this format:
 {{
-  "message": "Your natural conversational response to the user's message.",
+  "message": "Your human-friendly response.",
   "schema_updates": {{
-    "column_name": {{
+    "ExactColumnName": {{
       "action": "keep" | "drop" | "transform",
-      "reason": "Updated reason for this action based on user request",
-      "transformation": "Updated transformation detail (e.g. 'Convert string to date') or null"
+      "reason": "Reason for the change.",
+      "transformation": "Description or null"
     }}
   }}
 }}
-Ensure "schema_updates" is empty if the user's message did not ask to modify column actions.
+If no changes are needed, return empty schema_updates {{}}.
 """
+
+        messages_for_model.append({"role": "user", "content": f"{system_prompt}\n\nUser message: {message}"})
+
         logging.info("Sending chat query to Nvidia GLM-5.2...")
         completion = client.chat.completions.create(
             model="z-ai/glm-5.2",
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages_for_model,
             temperature=0.2,
             top_p=1,
-            max_tokens=4096,
+            max_tokens=1024,
             seed=42
         )
         response_text = completion.choices[0].message.content
-        ai_data = parse_json_response(response_text)
-        
-        response_msg = ai_data.get("message", "I have processed your request.")
-        schema_updates = ai_data.get("schema_updates", {})
-        
+
+        try:
+            ai_data = parse_json_response(response_text)
+            response_msg = ai_data.get("message", "I have processed your request.")
+            schema_updates = ai_data.get("schema_updates", {})
+        except Exception:
+            # Model returned plain text instead of JSON – still use it
+            response_msg = response_text.strip()
+            schema_updates = {}
+
+        # Apply schema updates and save
         for col, col_data in schema_updates.items():
+            # Case-insensitive match for safety
             matched_col = next((c for c in session_data["column_actions"] if c.lower() == col.lower()), col)
             session_data["column_actions"][matched_col] = col_data
-            
+
         session_data["chat_history"].append({"role": "assistant", "content": response_msg})
         save_session(session_data)
-        
+
         return jsonify({
             "message": response_msg,
             "schema_updates": schema_updates,
             "column_actions": session_data["column_actions"],
             "chat_history": session_data["chat_history"]
         })
-        
+
     except Exception as e:
         logging.error(f"Chat API failed: {str(e)}")
-        response_msg = f"Nvidia API is currently experiencing traffic spikes. Using local offline chat agent fallback.<br>({str(e)})"
-        # Run local fallback parsing
+        # Fallback to local parser
+        msg_lower = message.lower()
+        schema_updates = run_local_fallback(msg_lower, session_data)
+        response_msg = f"⚠️ AI API unavailable. Applied local parsing."
+        if schema_updates:
+            response_msg += f" Updated: **{', '.join(schema_updates.keys())}**."
+            for col, act in schema_updates.items():
+                session_data["column_actions"][col] = act
+        else:
+            response_msg += " No column changes detected. Try mentioning a column name with 'drop', 'keep', or 'transform'."
+
+        session_data["chat_history"].append({"role": "assistant", "content": response_msg})
+        save_session(session_data)
+        return jsonify({
+            "message": response_msg,
+            "schema_updates": schema_updates,
+            "column_actions": session_data["column_actions"],
+            "chat_history": session_data["chat_history"]
+        })
+
+
+# Streaming Chat Route via Server-Sent Events
+@app.route('/api/sessions/<session_id>/chat/stream', methods=['POST'])
+def chat_session_stream(session_id):
+    from flask import Response, stream_with_context
+    import re as re_module
+
+    session_data = load_session(session_id)
+    if not session_data:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.json or {}
+    message = data.get("message", "")
+    api_key = data.get("api_key")
+
+    if not message:
+        return jsonify({"error": "Missing message"}), 400
+
+    # Save user message immediately so it persists
+    session_data["chat_history"].append({"role": "user", "content": message})
+    save_session(session_data)
+
+    is_mock = (api_key == "MOCK")
+    client = None if is_mock else get_openai_client(api_key)
+
+    def run_local_fallback_stream():
+        """Local rule-based fallback that emits SSE events."""
         msg_lower = message.lower()
         schema_updates = {}
-        modified = False
         columns = [col["name"] for col in session_data["columns"]]
         for col in columns:
             if col.lower() in msg_lower:
-                if "drop" in msg_lower or "remove" in msg_lower or "delete" in msg_lower:
-                    schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in fallback chat.", "transformation": None}
-                    modified = True
-                elif "keep" in msg_lower or "add" in msg_lower:
-                    schema_updates[col] = {"action": "keep", "reason": "Kept by user request in fallback chat.", "transformation": None}
-                    modified = True
-                    
-        if modified:
-            response_msg += "<br>Applied update: column action successfully modified."
+                if any(kw in msg_lower for kw in ["drop", "remove", "delete", "eliminate"]):
+                    schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in chat.", "transformation": None}
+                elif any(kw in msg_lower for kw in ["keep", "add", "retain", "include"]):
+                    schema_updates[col] = {"action": "keep", "reason": "Kept by user request in chat.", "transformation": None}
+                elif any(kw in msg_lower for kw in ["transform", "convert", "encode", "impute"]):
+                    schema_updates[col] = {"action": "transform", "reason": "Transform requested in chat.", "transformation": "Custom transform"}
+
+        if schema_updates:
+            response_msg = f"Done! I've updated the action for **{', '.join(schema_updates.keys())}**. The schema grid has been refreshed."
             for col, act in schema_updates.items():
                 session_data["column_actions"][col] = act
-                
+        else:
+            response_msg = f"I'm here to help with your goal: **{session_data['goal']}**. Mention a column name with 'drop', 'keep', or 'transform' to make changes."
+
+        # Emit schema_updates event first
+        trigger = len(schema_updates) > 0
+        yield f"event: schema_updates\ndata: {json.dumps({'schema_updates': schema_updates, 'column_actions': session_data['column_actions'], 'trigger_reprocess': trigger})}\n\n"
+
+        # Stream the response word by word
+        for word in response_msg.split(' '):
+            yield f"data: {json.dumps({'token': word + ' '})}\n\n"
+
+        # Final done event
         session_data["chat_history"].append({"role": "assistant", "content": response_msg})
         save_session(session_data)
-        return jsonify({
-            "message": response_msg,
-            "schema_updates": schema_updates,
-            "column_actions": session_data["column_actions"],
-            "chat_history": session_data["chat_history"]
-        })
+
+        # Auto-trigger background re-process if schema changed
+        if trigger:
+            t = threading.Thread(target=run_background_process, args=(session_id, api_key), daemon=True)
+            t.start()
+
+        yield f"event: done\ndata: {json.dumps({'full_message': response_msg})}\n\n"
+
+    def run_ai_stream():
+        """Stream from Nvidia GLM-5.2 via SSE, extract schema_updates from full response."""
+        schema_context = []
+        for col in session_data["columns"]:
+            name = col["name"]
+            action_data = session_data["column_actions"].get(name, {"action": "keep", "reason": "Default", "transformation": ""})
+            schema_context.append({
+                "column": name,
+                "type": col["type"],
+                "null_count": col["null_count"],
+                "sample_values": col["sample_values"],
+                "current_action": action_data["action"],
+                "reason": action_data.get("reason", ""),
+                "transformation": action_data.get("transformation")
+            })
+
+        system_prompt = f"""You are an expert Data Scientist and AI cleaning assistant.
+The goal is: "{session_data['goal']}"
+
+Current columns and chosen actions:
+{json.dumps(schema_context, indent=2)}
+
+If the user asks for schema updates, include a JSON block at the end only:
+<<<SCHEMA_UPDATES>>>
+{{"column_name": {{"action": "drop|keep|transform", "reason": "...", "transformation": "... or null"}}}}
+<<<END>>>
+
+If no changes are needed, respond conversationally and omit the block."""
+
+        # Build proper multi-turn messages
+        messages_for_model = [{"role": "system", "content": system_prompt}]
+        # Add prior conversation turns (skip last user msg, we'll add it below)
+        for turn in session_data["chat_history"][:-1]:
+            messages_for_model.append({"role": turn["role"], "content": turn["content"]})
+        messages_for_model.append({"role": "user", "content": message})
+
+        full_response = ""
+        schema_updates = {}
+
+        try:
+            stream = client.chat.completions.create(
+                model="z-ai/glm-5.2",
+                messages=messages_for_model,
+                temperature=0.3,
+                top_p=1,
+                max_tokens=1024,
+                stream=True
+            )
+
+            for chunk in stream:
+                if not getattr(chunk, "choices", None):
+                    continue
+                if not chunk.choices or not getattr(chunk.choices[0], "delta", None):
+                    continue
+                delta = chunk.choices[0].delta
+                token = getattr(delta, "content", None)
+                if token is None:
+                    continue
+
+                full_response += token
+
+                # Don't stream the SCHEMA_UPDATES block to the user
+                if "<<<SCHEMA_UPDATES>>>" not in full_response:
+                    yield f"data: {json.dumps({'token': token})}\n\n"
+
+            # Extract schema updates from the full response
+            if "<<<SCHEMA_UPDATES>>>" in full_response and "<<<END>>>" in full_response:
+                parts = full_response.split("<<<SCHEMA_UPDATES>>>")
+                visible_text = parts[0].strip()
+                json_block = parts[1].split("<<<END>>>")[0].strip()
+                try:
+                    schema_updates = json.loads(json_block)
+                    # Apply updates
+                    for col, col_data in schema_updates.items():
+                        matched_col = next((c for c in session_data["column_actions"] if c.lower() == col.lower()), col)
+                        session_data["column_actions"][matched_col] = col_data
+                except Exception as parse_err:
+                    logging.warning(f"Failed to parse schema_updates JSON block: {parse_err}")
+                full_response = visible_text
+            else:
+                full_response = full_response.strip()
+
+        except Exception as e:
+            logging.error(f"Streaming chat failed: {str(e)}")
+            # Fallback: local rule parsing
+            msg_lower = message.lower()
+            columns = [col["name"] for col in session_data["columns"]]
+            for col in columns:
+                if col.lower() in msg_lower:
+                    if any(kw in msg_lower for kw in ["drop", "remove", "delete"]):
+                        schema_updates[col] = {"action": "drop", "reason": "Dropped by user in chat (fallback).", "transformation": None}
+                        session_data["column_actions"][col] = schema_updates[col]
+                    elif any(kw in msg_lower for kw in ["keep", "retain", "include"]):
+                        schema_updates[col] = {"action": "keep", "reason": "Kept by user in chat (fallback).", "transformation": None}
+                        session_data["column_actions"][col] = schema_updates[col]
+            full_response = f"⚠️ Streaming API unavailable ({str(e)[:60]}). Changes applied via local rule engine."
+            yield f"data: {json.dumps({'token': full_response})}\n\n"
+
+        # Emit schema updates event (even if empty – frontend always listens)
+        trigger = len(schema_updates) > 0
+        yield f"event: schema_updates\ndata: {json.dumps({'schema_updates': schema_updates, 'column_actions': session_data['column_actions'], 'trigger_reprocess': trigger})}\n\n"
+
+        # Save to session DB
+        session_data["chat_history"].append({"role": "assistant", "content": full_response})
+        save_session(session_data)
+
+        # Auto-trigger background re-process if schema changed
+        if trigger:
+            t = threading.Thread(target=run_background_process, args=(session_id, api_key), daemon=True)
+            t.start()
+
+        # Final done event
+        yield f"event: done\ndata: {json.dumps({'full_message': full_response})}\n\n"
+
+    generator = run_local_fallback_stream() if (is_mock or not client) else run_ai_stream()
+
+    return Response(
+        stream_with_context(generator),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+            'Connection': 'keep-alive'
+        }
+    )
 
 # PDF Generation Endpoint
 @app.route('/api/sessions/<session_id>/pdf', methods=['POST'])
 def create_pdf_report(session_id):
+
     if not reportlab_installed:
         return jsonify({"error": "ReportLab library is not properly installed or imported."}), 500
         

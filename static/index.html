@@ -118,6 +118,9 @@
                         <button class="btn btn-primary" id="analyze-data-btn" disabled>
                             Start AI Analysis <i class="fa-solid fa-arrow-right icon-suffix"></i>
                         </button>
+                        <button class="btn btn-secondary" id="process-data-btn" disabled>
+                            Process Data <i class="fa-solid fa-cogs icon-suffix"></i>
+                        </button>
                     </div>
                 </section>
 
@@ -183,9 +186,7 @@
                                             <div class="stat-badge drop-badge"><span class="badge-num" id="rec-drop-cols">0</span><span class="badge-label">Drop</span></div>
                                             <div class="stat-badge transform-badge"><span class="badge-num" id="rec-transform-cols">0</span><span class="badge-label">Trans</span></div>
                                         </div>
-                                        <button class="btn btn-primary" id="process-data-btn">
-                                            Clean & Process Data <i class="fa-solid fa-circle-check icon-suffix"></i>
-                                        </button>
+                                        <span class="schema-auto-label"><i class="fa-solid fa-bolt"></i> Auto-processing on change</span>
                                     </div>
                                     <div class="grid-columns" id="columns-recommendation-grid">
                                         <!-- Column cards populated dynamically -->
@@ -285,14 +286,46 @@
     <!-- LOADING SPINNER OVERLAY -->
     <div class="loading-overlay hidden" id="global-loader">
         <div class="loader-content">
-            <div class="spinner">
-                <div class="double-bounce1"></div>
-                <div class="double-bounce2"></div>
+            <!-- Wave Loader Animation -->
+            <div class="wave-loader">
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
+                <span class="wave-bar"></span>
             </div>
+            
             <h3 id="loader-title">Analyzing data...</h3>
             <p id="loader-subtitle">Please wait, Nvidia GLM-5.2 is examining your schema.</p>
+
+            <!-- Progressive Progress Bar -->
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="loader-progress-fill" style="width: 0%;"></div>
+            </div>
+            <div class="progress-bar-percent" id="loader-progress-percent">0%</div>
+
+            <!-- Progressive Steps Tracker -->
+            <div class="progress-steps-list">
+                <div class="progress-step-item" id="step-marker-1">
+                    <span class="step-dot"></span>
+                    <span class="step-label">Reading & parsing dataset file</span>
+                </div>
+                <div class="progress-step-item" id="step-marker-2">
+                    <span class="step-dot"></span>
+                    <span class="step-label">Profiling column statistics</span>
+                </div>
+                <div class="progress-step-item" id="step-marker-3">
+                    <span class="step-dot"></span>
+                    <span class="step-label">Consulting Nvidia GLM-5.2 AI model</span>
+                </div>
+                <div class="progress-step-item" id="step-marker-4">
+                    <span class="step-dot"></span>
+                    <span class="step-label">Parsing AI response & saving schema</span>
+                </div>
+            </div>
         </div>
     </div>
+
 
     <!-- Application Script -->
     <script src="app.js"></script>

@@ -1,0 +1,158 @@
+{
+  "session_id": "585fc4dc-3071-457a-9637-ccdd4aa6a513",
+  "name": "EV_Dataset.csv",
+  "original_filename": "EV_Dataset.csv",
+  "file_id": "0eea3d4e-487a-4e0b-a16d-3afa5749c67a.csv",
+  "file_type": "csv",
+  "sheets": [
+    "Default"
+  ],
+  "row_count": 96845,
+  "col_count": 8,
+  "columns": [
+    {
+      "name": "Year",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        2014.0,
+        2014.0,
+        2014.0
+      ]
+    },
+    {
+      "name": "Month_Name",
+      "type": "object",
+      "null_count": 0,
+      "sample_values": [
+        "jan",
+        "jan",
+        "jan"
+      ]
+    },
+    {
+      "name": "Date",
+      "type": "object",
+      "null_count": 0,
+      "sample_values": [
+        "1/1/2014",
+        "1/1/2014",
+        "1/1/2014"
+      ]
+    },
+    {
+      "name": "State",
+      "type": "object",
+      "null_count": 0,
+      "sample_values": [
+        "Andhra Pradesh",
+        "Andhra Pradesh",
+        "Andhra Pradesh"
+      ]
+    },
+    {
+      "name": "Vehicle_Class",
+      "type": "object",
+      "null_count": 0,
+      "sample_values": [
+        "ADAPTED VEHICLE",
+        "AGRICULTURAL TRACTOR",
+        "AMBULANCE"
+      ]
+    },
+    {
+      "name": "Vehicle_Category",
+      "type": "object",
+      "null_count": 0,
+      "sample_values": [
+        "Others",
+        "Others",
+        "Others"
+      ]
+    },
+    {
+      "name": "Vehicle_Type",
+      "type": "object",
+      "null_count": 0,
+      "sample_values": [
+        "Others",
+        "Others",
+        "Others"
+      ]
+    },
+    {
+      "name": "EV_Sales_Quantity",
+      "type": "float64",
+      "null_count": 0,
+      "sample_values": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ],
+  "preview": [
+    {
+      "Year": 2014.0,
+      "Month_Name": "jan",
+      "Date": "1/1/2014",
+      "State": "Andhra Pradesh",
+      "Vehicle_Class": "ADAPTED VEHICLE",
+      "Vehicle_Category": "Others",
+      "Vehicle_Type": "Others",
+      "EV_Sales_Quantity": 0.0
+    },
+    {
+      "Year": 2014.0,
+      "Month_Name": "jan",
+      "Date": "1/1/2014",
+      "State": "Andhra Pradesh",
+      "Vehicle_Class": "AGRICULTURAL TRACTOR",
+      "Vehicle_Category": "Others",
+      "Vehicle_Type": "Others",
+      "EV_Sales_Quantity": 0.0
+    },
+    {
+      "Year": 2014.0,
+      "Month_Name": "jan",
+      "Date": "1/1/2014",
+      "State": "Andhra Pradesh",
+      "Vehicle_Class": "AMBULANCE",
+      "Vehicle_Category": "Others",
+      "Vehicle_Type": "Others",
+      "EV_Sales_Quantity": 0.0
+    },
+    {
+      "Year": 2014.0,
+      "Month_Name": "jan",
+      "Date": "1/1/2014",
+      "State": "Andhra Pradesh",
+      "Vehicle_Class": "ARTICULATED VEHICLE",
+      "Vehicle_Category": "Others",
+      "Vehicle_Type": "Others",
+      "EV_Sales_Quantity": 0.0
+    },
+    {
+      "Year": 2014.0,
+      "Month_Name": "jan",
+      "Date": "1/1/2014",
+      "State": "Andhra Pradesh",
+      "Vehicle_Class": "BUS",
+      "Vehicle_Category": "Bus",
+      "Vehicle_Type": "Bus",
+      "EV_Sales_Quantity": 0.0
+    }
+  ],
+  "goal": "Remove date column",
+  "column_actions": {},
+  "chat_history": [
+    {
+      "role": "assistant",
+      "content": "Hi! I've loaded your dataset: `EV_Dataset.csv`. What model do you plan to train, or what is your data analysis goal?"
+    }
+  ],
+  "charts": [],
+  "cleaned_filename": null,
+  "created_at": "2026-07-29T20:13:28.747372",
+  "sheet_name": "Default"
+}
