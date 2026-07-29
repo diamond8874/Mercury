@@ -43,8 +43,16 @@ body {
     color: var(--text-main);
     font-family: var(--font-body);
     min-height: 100vh;
+    min-height: 100dvh;
     overflow-x: hidden;
     line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+}
+
+/* Column names, model ids, goals and filenames are all data-supplied and were
+   forcing horizontal overflow when long. */
+h1, h2, h3, h4, p, span, div, label, li, a {
+    overflow-wrap: anywhere;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -56,8 +64,9 @@ h1, h2, h3, h4, h5, h6 {
 /* App Container Layout */
 .app-container {
     display: flex;
-    min-height: 100vh;
-    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    width: 100%;
     overflow: hidden;
 }
 
@@ -70,7 +79,10 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    height: 100vh;
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    padding-left: max(1.25rem, env(safe-area-inset-left));
 }
 
 .logo-area {
@@ -116,6 +128,7 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 0;
     margin-bottom: 1.5rem;
 }
 
@@ -258,7 +271,9 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     flex-direction: column;
     padding: 1.5rem 2rem;
-    height: 100vh;
+    height: 100%;
+    min-height: 0;
+    min-width: 0;
     overflow: hidden;
 }
 
@@ -313,6 +328,7 @@ h1, h2, h3, h4, h5, h6 {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    min-height: 0;
 }
 
 .step-section {
@@ -320,7 +336,13 @@ h1, h2, h3, h4, h5, h6 {
     flex-direction: column;
     gap: 1.5rem;
     flex-grow: 1;
-    overflow: hidden;
+    /* Was overflow:hidden, which silently clipped the upload, read-out and
+       goal cards on any screen too short to fit them - with no scrollbar. */
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+    padding-right: 0.35rem;
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
 
 .step-section.active {
@@ -598,6 +620,7 @@ h1, h2, h3, h4, h5, h6 {
 .action-footer {
     display: flex;
     justify-content: flex-end;
+    flex-wrap: wrap;
     gap: 1rem;
     margin-top: 0.5rem;
     border-top: 1px solid var(--border-glass);
@@ -609,7 +632,11 @@ h1, h2, h3, h4, h5, h6 {
 .split-layout {
     display: flex;
     gap: 1.5rem;
-    height: calc(100vh - 120px);
+    /* Was calc(100vh - 120px), which broke whenever the header wrapped.
+       Sizing from the flex parent is correct at every viewport. */
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
     overflow: hidden;
     align-items: stretch;
 }
@@ -620,6 +647,8 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
+    min-width: 0;
     padding: 1.25rem;
     overflow: hidden;
 }
@@ -654,6 +683,8 @@ h1, h2, h3, h4, h5, h6 {
 .chat-messages {
     flex-grow: 1;
     overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 0.85rem;
@@ -792,6 +823,8 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 0;
+    min-width: 0;
     overflow: hidden;
 }
 
@@ -838,6 +871,8 @@ h1, h2, h3, h4, h5, h6 {
 .tab-content-area {
     flex-grow: 1;
     overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
     position: relative;
     padding-right: 0.25rem;
 }
@@ -912,7 +947,9 @@ h1, h2, h3, h4, h5, h6 {
 
 .grid-columns {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    /* min() lets the track shrink below 280px instead of overflowing the
+       panel, which is what caused sideways scroll on narrow screens. */
+    grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
     gap: 1rem;
 }
 
@@ -1127,7 +1164,7 @@ h1, h2, h3, h4, h5, h6 {
 /* VISUALIZATIONS TAB */
 .charts-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
     gap: 1.5rem;
 }
 
@@ -1238,11 +1275,18 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 1rem;
+    overflow-y: auto;
 }
 
 .modal-content {
     width: 450px;
-    max-width: 90%;
+    max-width: min(90vw, 100% - 2rem);
+    /* The settings modal grew past the fold on laptops and phones and could
+       not be scrolled or dismissed. */
+    max-height: min(88dvh, 900px);
+    display: flex;
+    flex-direction: column;
     animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -1267,6 +1311,11 @@ h1, h2, h3, h4, h5, h6 {
     flex-direction: column;
     gap: 1.25rem;
     margin-bottom: 1.5rem;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+    flex: 1 1 auto;
+    padding-right: 0.25rem;
 }
 
 .form-group {
@@ -1317,7 +1366,10 @@ h1, h2, h3, h4, h5, h6 {
 .modal-footer {
     display: flex;
     justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
     gap: 0.75rem;
+    flex-shrink: 0;
 }
 
 /* Global Loader spinner */
@@ -1342,7 +1394,9 @@ h1, h2, h3, h4, h5, h6 {
     align-items: center;
     gap: 1.25rem;
     max-width: 420px;
-    width: 90%;
+    width: min(90%, 420px);
+    max-height: 88dvh;
+    overflow-y: auto;
     padding: 2rem;
     background: rgba(19, 27, 46, 0.7);
     border: 1px solid var(--border-glass);
@@ -1523,33 +1577,264 @@ h1, h2, h3, h4, h5, h6 {
 
 
 /* Responsive Overrides */
-@media(max-width: 1024px) {
-    .app-container {
-        flex-direction: column;
-        overflow-y: auto;
-    }
+/* =====================================================================
+   RESPONSIVE LAYER
+   Breakpoints: 1440 / 1200 / 1024 / 820 / 640 / 420, plus short-viewport
+   and reduced-motion. The rule everywhere is the same: a region either
+   sizes from its flex parent or scrolls itself - nothing is ever clipped.
+   ===================================================================== */
+
+/* Off-canvas sidebar plumbing. Inert above the mobile breakpoint. */
+.sidebar-toggle {
+    display: none;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-glass);
+    color: var(--text-main);
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    transition: var(--transition-smooth);
+}
+
+.sidebar-toggle:hover {
+    border-color: var(--border-hover);
+    color: var(--primary);
+}
+
+.sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(11, 15, 25, 0.6);
+    backdrop-filter: blur(2px);
+    z-index: 900;
+}
+
+/* ── Large desktops: give the content more room ───────────────────── */
+@media (min-width: 1441px) {
+    .workspace { padding: 1.75rem 2.5rem; }
+    .split-layout { gap: 1.75rem; }
+    .chart-card { height: 360px; }
+}
+
+/* ── Narrow desktops / small laptops ──────────────────────────────── */
+@media (max-width: 1200px) {
+    .sidebar { width: 250px; padding: 1.5rem 1rem; }
+    .workspace { padding: 1.25rem 1.5rem; }
+    .split-layout { gap: 1rem; }
+    .chat-panel { width: 42%; }
+    .workspace-panel { width: 58%; }
+    .tab-btn { padding: 0.5rem 0.7rem; font-size: 0.8rem; }
+    .charts-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Tablets and below: sidebar becomes an off-canvas drawer ──────── */
+@media (max-width: 1024px) {
+    .sidebar-toggle { display: inline-flex; }
+
     .sidebar {
-        width: 100%;
-        padding: 1.25rem;
-        height: auto;
-        border-right: none;
-        border-bottom: 1px solid var(--border-glass);
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: min(300px, 85vw);
+        z-index: 950;
+        transform: translateX(-100%);
+        transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 8px 0 32px rgba(0, 0, 0, 0.45);
+        padding-top: max(1.5rem, env(safe-area-inset-top));
     }
-    .history-section {
-        max-height: 150px;
+
+    .app-container.sidebar-open .sidebar { transform: translateX(0); }
+    .app-container.sidebar-open .sidebar-backdrop { display: block; }
+
+    .workspace {
+        padding: 1rem 1.25rem;
+        padding-left: max(1.25rem, env(safe-area-inset-left));
+        padding-right: max(1.25rem, env(safe-area-inset-right));
     }
+
+    .workspace-header { gap: 0.75rem; }
+    .header-title h2 { font-size: 1.2rem; }
+
+    /* Stack chat over the workspace, and let the page scroll as one column
+       instead of forcing two independently-clipped panes. */
     .split-layout {
         flex-direction: column;
-        height: auto;
+        overflow-y: auto;
+        overflow-x: hidden;
+        gap: 1rem;
+        padding-right: 0.35rem;
     }
-    .chat-panel, .workspace-panel {
+
+    .chat-panel,
+    .workspace-panel {
         width: 100%;
-        height: 450px;
-    }
-    .workspace {
         height: auto;
+        flex: 0 0 auto;
         overflow: visible;
     }
+
+    /* Bounded, scrollable regions - not the old fixed 450px that clipped. */
+    .chat-panel { min-height: 380px; max-height: 65dvh; overflow: hidden; }
+    .chat-messages { max-height: none; }
+    .workspace-panel { min-height: 420px; }
+    .tab-content-area { overflow-y: visible; }
+}
+
+/* ── Large phones / small tablets ─────────────────────────────────── */
+@media (max-width: 820px) {
+    .workspace { padding: 0.85rem 1rem; }
+
+    .workspace-header {
+        flex-wrap: wrap;
+        align-items: flex-start;
+        padding-bottom: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .header-title { flex: 1 1 60%; min-width: 0; }
+    .header-title h2 { font-size: 1.1rem; }
+    .workspace-subtitle p, .header-title p { font-size: 0.78rem; }
+
+    .api-key-status { order: 3; flex: 1 1 100%; justify-content: center; }
+
+    .glass-card { padding: 1.15rem; border-radius: 16px; }
+    .step-section { gap: 1rem; }
+
+    /* Tabs scroll horizontally rather than wrapping into an unusable stack. */
+    .tabs-bar {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .tabs-bar::-webkit-scrollbar { display: none; }
+    .tab-btn { flex-shrink: 0; }
+
+    .readout-metrics { grid-template-columns: repeat(2, 1fr); }
+    .grid-columns { grid-template-columns: 1fr; }
+    .export-cards-wrapper { grid-template-columns: 1fr; }
+
+    .modal-wide { width: 100%; }
+    .modal-footer { justify-content: stretch; }
+    .modal-footer .btn { flex: 1 1 auto; justify-content: center; }
+    .modal-footer-spacer { display: none; }
+
+    .chat-message { max-width: 92%; }
+    .chart-card { height: 300px; }
+}
+
+/* ── Phones ───────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+    .workspace { padding: 0.75rem 0.85rem; }
+    .glass-card { padding: 1rem; border-radius: 14px; }
+
+    .header-title h2 { font-size: 1rem; }
+    .header-title p { display: none; }
+
+    .drop-zone { padding: 1.5rem 1rem; }
+    .drop-zone-content h3 { font-size: 0.95rem; }
+    .file-icon { font-size: 2rem; }
+
+    .goal-input-wrapper textarea { min-height: 90px; font-size: 0.9rem; }
+
+    .presets-container { gap: 0.4rem; }
+    .preset-btn { font-size: 0.7rem; padding: 0.3rem 0.6rem; }
+
+    /* Full-width primary action - the old right-aligned button was easy to
+       miss at the bottom of a scrolling column. */
+    .action-footer { justify-content: stretch; }
+    .action-footer .btn { flex: 1 1 auto; justify-content: center; }
+
+    .readout-metrics { grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+    .readout-metric { padding: 0.55rem 0.7rem; }
+    .readout-num { font-size: 1.15rem; }
+    .readout-header { gap: 0.5rem; }
+
+    .rec-summary-stats { gap: 0.4rem; }
+    .stat-badge { padding: 0.3rem 0.6rem; }
+
+    .pane-header { flex-direction: column; align-items: stretch; }
+    .pane-header .btn { width: 100%; justify-content: center; }
+
+    .chat-panel { min-height: 320px; max-height: 60dvh; padding: 1rem; }
+    .chat-message { max-width: 96%; font-size: 0.85rem; }
+    .chat-suggestions { overflow-x: auto; scrollbar-width: none; }
+    .chat-suggestions::-webkit-scrollbar { display: none; }
+    .suggestion-chip { flex-shrink: 0; }
+
+    .chart-card { height: 270px; }
+    .export-card { padding: 1.1rem; }
+
+    .col-card-header { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+    .col-selector-group { width: 100%; }
+    .action-selector { flex: 1; }
+
+    .loader-content { padding: 1.5rem 1.15rem; gap: 1rem; }
+    .step-label { font-size: 0.72rem; }
+}
+
+/* ── Small phones ─────────────────────────────────────────────────── */
+@media (max-width: 420px) {
+    .workspace { padding: 0.6rem; }
+    .glass-card { padding: 0.85rem; }
+    .readout-metrics { grid-template-columns: 1fr 1fr; }
+    .logo-text h1 { font-size: 1.1rem; }
+    .chart-card { height: 240px; }
+    .tab-btn span, .tab-btn { font-size: 0.75rem; }
+    .preview-table { font-size: 0.7rem; }
+    .preview-table th, .preview-table td { padding: 0.45rem 0.6rem; }
+}
+
+/* ── Short viewports (landscape phones, split-screen windows) ─────── */
+@media (max-height: 620px) and (min-width: 1025px) {
+    .workspace { padding: 0.85rem 1.5rem; }
+    .workspace-header { padding-bottom: 0.6rem; margin-bottom: 0.75rem; }
+    .header-title h2 { font-size: 1.15rem; }
+    .chart-card { height: 260px; }
+}
+
+@media (max-height: 500px) {
+    .loader-content { max-height: 92dvh; padding: 1rem; gap: 0.6rem; }
+    .progress-steps-list { display: none; }
+    .wave-loader { transform: scale(0.8); }
+    .chat-panel { min-height: 240px; }
+}
+
+/* ── Touch input: bigger targets, no hover-only affordances ───────── */
+@media (hover: none) and (pointer: coarse) {
+    .btn, .tab-btn, .action-selector, .preset-btn, .suggestion-chip {
+        min-height: 42px;
+    }
+    .btn-icon, .delete-session-btn { min-width: 40px; min-height: 40px; }
+    /* Always-visible delete affordance: there is no hover on touch. */
+    .session-item .delete-session-btn { opacity: 1; }
+}
+
+/* ── Respect the OS "reduce motion" setting ───────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ── Print: drop the chrome, keep the data ────────────────────────── */
+@media print {
+    .sidebar, .sidebar-toggle, .sidebar-backdrop, .chat-panel,
+    .tabs-bar, .action-footer, .loading-overlay, .modal-overlay { display: none !important; }
+    .app-container, .workspace, .split-layout { display: block; height: auto; overflow: visible; }
+    .workspace-panel { width: 100%; }
+    .tab-pane { display: block !important; page-break-inside: avoid; }
+    body { background: #fff; color: #000; }
 }
 
 /* ── Streaming Chat Styles ── */
@@ -1622,3 +1907,226 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 
+
+/* =====================================================================
+   Dataset read-out card (Stage 1: file is read + profiled before any AI)
+   ===================================================================== */
+.readout-card {
+    padding: 1.25rem 1.5rem;
+    animation: slideUp 0.3s ease;
+}
+
+.readout-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.readout-header h3 {
+    font-size: 1.05rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.readout-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.3rem 0.85rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    color: var(--primary);
+}
+
+.readout-status.ready {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.3);
+    color: var(--success);
+}
+
+.readout-status.fail {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #f87171;
+}
+
+.readout-progress {
+    height: 4px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+    margin: 0.85rem 0 1rem 0;
+}
+
+.readout-progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--primary), var(--accent));
+    transition: width 0.4s ease;
+}
+
+.readout-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 0.75rem;
+}
+
+.readout-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.7rem 0.9rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-glass);
+    border-radius: 10px;
+}
+
+.readout-num {
+    font-family: var(--font-display, inherit);
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.readout-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.readout-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 1rem;
+}
+
+.type-chip {
+    padding: 0.22rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.type-numeric   { background: rgba(99, 102, 241, 0.15);  color: #a5b4fc; }
+.type-categorical { background: rgba(168, 85, 247, 0.15); color: #d8b4fe; }
+.type-datetime  { background: rgba(16, 185, 129, 0.15);  color: #6ee7b7; }
+
+.type-col {
+    padding: 0.22rem 0.55rem;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-glass);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-family: 'Courier New', monospace;
+}
+
+.readout-warnings {
+    list-style: none;
+    margin-top: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.readout-warnings li {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.75rem;
+    color: #fbbf24;
+}
+
+/* =====================================================================
+   Provider settings modal additions
+   ===================================================================== */
+.modal-wide {
+    width: 560px;
+}
+
+.modal-footer-spacer {
+    flex: 1;
+}
+
+.input-inline-wrapper {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.input-inline-wrapper input,
+#settings-base-url,
+#settings-access-token {
+    flex: 1;
+    width: 100%;
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-glass);
+    padding: 0.65rem 0.85rem;
+    border-radius: 8px;
+    color: var(--text-main);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    outline: none;
+}
+
+.input-inline-wrapper input:focus,
+#settings-base-url:focus,
+#settings-access-token:focus {
+    border-color: var(--primary);
+}
+
+.btn-compact {
+    padding: 0.5rem 0.9rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.settings-test-result {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.7rem 0.9rem;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.settings-test-result.ok {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #6ee7b7;
+}
+
+.settings-test-result.fail {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+}
+
+/* Inline PDF-download button rendered inside an assistant chat bubble */
+.chat-inline-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    padding: 0.4rem 1rem;
+    font-size: 0.8rem;
+    text-decoration: none;
+}
+
+/* The API status chip in the header opens the provider settings */
+.api-key-status {
+    cursor: pointer;
+}
