@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Multi-Provider LLM Abstraction (`services/ai_service.py`)**: Built a robust `UnifiedLLMClient` backed by `LiteLLM` that acts as a drop-in replacement for standard OpenAI client. Supports automatic provider detection, custom base URLs, custom API keys, and auto-fallback behavior.
+- **Environment Matrix Setup (`.env.example`)**: Added `.env.example` defining environment variables for all major providers (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL`, `LLM_PROVIDER`, `LLM_MODEL`).
+- **Unit & Integration Tests**: Expanded `tests/test_app.py` with `test_unified_llm_client_routing` validating auto-routing resolution and client configurations across OpenAI, Anthropic, Gemini, OpenRouter, and Ollama.
+
+### Changed
+- **REST Blueprint Routes (`components/routes.py`)**: Refactored `/api/analyze`, `/api/sessions/<id>/chat`, and `/api/sessions/<id>/chat/stream` to parse `provider`, `model`, and `base_url` overrides from incoming JSON request payloads, and instantiate the proper unified client.
+- **Frontend Configuration Panel (`static/index.html` & `static/app.js`)**: Updated the "Nvidia API Key" button to "LLM Configuration" and redesigned the modal with dropdown selectors for LLM Provider (NVIDIA, OpenAI, Anthropic, Gemini, OpenRouter, Ollama) and text fields for Model, API Key overrides, and Custom Base URLs. Persisted LLM settings dynamically in `localStorage` across page loads.
+
+### Added
 - Created `tests/test_app.py` containing integration regression tests verifying backend endpoints, upload, chat streaming, and mock engines under pytest.
 
 ### Changed

@@ -1,6 +1,9 @@
 // Application State
 const appState = {
     apiKey: localStorage.getItem('nvidia_api_key') || '',
+    provider: localStorage.getItem('llm_provider') || '',
+    model: localStorage.getItem('llm_model') || '',
+    baseUrl: localStorage.getItem('llm_base_url') || '',
     activeSessionId: null,
     sessionData: null,
     sessionsHistory: [],
@@ -16,6 +19,9 @@ const els = {
     cancelSettingsBtn: document.getElementById('cancel-settings-btn'),
     saveSettingsBtn: document.getElementById('save-settings-btn'),
     settingsApiKey: document.getElementById('settings-api-key'),
+    settingsProvider: document.getElementById('settings-provider'),
+    settingsModel: document.getElementById('settings-model'),
+    settingsBaseUrl: document.getElementById('settings-base-url'),
     toggleKeyVisibility: document.getElementById('toggle-key-visibility'),
     
     // Sidebar History
@@ -154,19 +160,42 @@ function hideLoader() {
 
 // 1. API KEY SETTINGS MANAGEMENTS
 function updateApiStatus() {
-    if (appState.apiKey) {
-        els.apiStatus.querySelector('.status-indicator').className = 'status-indicator success';
-        els.apiStatus.querySelector('.status-text').textContent = 'Custom Key Loaded';
-        els.settingsApiKey.value = appState.apiKey;
-    } else {
-        els.apiStatus.querySelector('.status-indicator').className = 'status-indicator warning';
-        els.apiStatus.querySelector('.status-text').textContent = 'Default Key Active';
-        els.settingsApiKey.value = '';
+    const statusText = els.apiStatus.querySelector('.status-text');
+    const indicator = els.apiStatus.querySelector('.status-indicator');
+
+    let label = 'Default (NVIDIA)';
+    if (appState.provider) {
+        label = appState.provider.toUpperCase();
+        if (appState.model) {
+            label += `: ${appState.model}`;
+        }
+    } else if (appState.model) {
+        label = `Auto: ${appState.model}`;
     }
+
+    if (appState.apiKey) {
+        indicator.className = 'status-indicator success';
+        statusText.textContent = `${label} (Custom Key)`;
+    } else {
+        indicator.className = 'status-indicator warning';
+        statusText.textContent = `${label} (Default)`;
+    }
+
+    // Fill the inputs in the modal
+    if (els.settingsProvider) els.settingsProvider.value = appState.provider || '';
+    if (els.settingsModel) els.settingsModel.value = appState.model || '';
+    els.settingsApiKey.value = appState.apiKey || '';
+    if (els.settingsBaseUrl) els.settingsBaseUrl.value = appState.baseUrl || '';
 }
 
 function initSettingsModal() {
-    els.openSettingsBtn.addEventListener('click', () => els.settingsModal.classList.remove('hidden'));
+    els.openSettingsBtn.addEventListener('click', () => {
+        if (els.settingsProvider) els.settingsProvider.value = appState.provider || '';
+        if (els.settingsModel) els.settingsModel.value = appState.model || '';
+        els.settingsApiKey.value = appState.apiKey || '';
+        if (els.settingsBaseUrl) els.settingsBaseUrl.value = appState.baseUrl || '';
+        els.settingsModal.classList.remove('hidden');
+    });
     
     const closeModal = () => {
         els.settingsModal.classList.add('hidden');
@@ -177,9 +206,16 @@ function initSettingsModal() {
     els.cancelSettingsBtn.addEventListener('click', closeModal);
     
     els.saveSettingsBtn.addEventListener('click', () => {
-        const val = els.settingsApiKey.value.trim();
-        appState.apiKey = val;
-        localStorage.setItem('nvidia_api_key', val);
+        appState.provider = els.settingsProvider ? els.settingsProvider.value : '';
+        appState.model = els.settingsModel ? els.settingsModel.value.trim() : '';
+        appState.apiKey = els.settingsApiKey.value.trim();
+        appState.baseUrl = els.settingsBaseUrl ? els.settingsBaseUrl.value.trim() : '';
+
+        localStorage.setItem('llm_provider', appState.provider);
+        localStorage.setItem('llm_model', appState.model);
+        localStorage.setItem('nvidia_api_key', appState.apiKey);
+        localStorage.setItem('llm_base_url', appState.baseUrl);
+
         updateApiStatus();
         els.settingsModal.classList.add('hidden');
     });
@@ -582,6 +618,9 @@ async function runAiSchemaAnalysis() {
                 session_id: appState.activeSessionId,
                 goal: goal,
                 api_key: appState.apiKey,
+                provider: appState.provider,
+                model: appState.model,
+                base_url: appState.baseUrl,
                 sheet_name: els.sheetSelect.value || 'Default'
             })
         });
@@ -888,6 +927,9 @@ async function executePandasProcess() {
                 session_id: appState.activeSessionId,
                 actions: appState.sessionData.column_actions,
                 api_key: appState.apiKey,
+                provider: appState.provider,
+                model: appState.model,
+                base_url: appState.baseUrl,
                 sheet_name: els.sheetSelect.value || 'Default'
             })
         });
@@ -1144,7 +1186,10 @@ async function sendChatUserMessage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: text,
-                api_key: appState.apiKey
+                api_key: appState.apiKey,
+                provider: appState.provider,
+                model: appState.model,
+                base_url: appState.baseUrl
             })
         });
 

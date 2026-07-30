@@ -43,7 +43,7 @@
 
             <div class="sidebar-footer">
                 <button class="settings-btn" id="open-settings-btn">
-                    <i class="fa-solid fa-gear"></i> Nvidia API Key
+                    <i class="fa-solid fa-gear"></i> LLM Configuration
                 </button>
             </div>
         </aside>
@@ -267,12 +267,37 @@
             
             <div class="modal-body">
                 <div class="form-group">
-                    <label for="settings-api-key">Nvidia API Key:</label>
-                    <p class="form-help">Enter your Nvidia API key to override the default key. Leave empty to use the pre-configured key.</p>
-                    <div class="input-password-wrapper">
-                        <input type="password" id="settings-api-key" placeholder="nvapi-...">
-                        <button class="btn-icon" id="toggle-key-visibility"><i class="fa-solid fa-eye"></i></button>
+                    <label for="settings-provider">LLM Provider:</label>
+                    <select id="settings-provider" class="form-select" style="width: 100%; padding: 0.75rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
+                        <option value="">Default (NVIDIA / Auto-detect)</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic (Claude)</option>
+                        <option value="gemini">Google (Gemini)</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="ollama">Ollama (Local)</option>
+                        <option value="nvidia">Nvidia API</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="settings-model">LLM Model:</label>
+                    <p class="form-help" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Type your preferred model identifier (e.g., gpt-4o, claude-3-7-sonnet, gemini-2.5-flash, llama3).</p>
+                    <input type="text" id="settings-model" placeholder="e.g. z-ai/glm-5.2" style="width: 100%; padding: 0.75rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
+                </div>
+
+                <div class="form-group">
+                    <label for="settings-api-key">API Key Override:</label>
+                    <p class="form-help" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Enter your API key. If left blank, environment variables (e.g., ANTHROPIC_API_KEY) will be used.</p>
+                    <div class="input-password-wrapper" style="position: relative;">
+                        <input type="password" id="settings-api-key" placeholder="API Key..." style="width: 100%; padding: 0.75rem; padding-right: 2.5rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
+                        <button class="btn-icon" id="toggle-key-visibility" style="position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer;"><i class="fa-solid fa-eye"></i></button>
                     </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="settings-base-url">Custom Base URL (Optional):</label>
+                    <p class="form-help" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Useful for Ollama or custom API proxies.</p>
+                    <input type="text" id="settings-base-url" placeholder="e.g. http://localhost:11434" style="width: 100%; padding: 0.75rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
                 </div>
             </div>
             
