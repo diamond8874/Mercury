@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 # Services
-from services.ai_service import get_openai_client
+from services.ai_service import get_openai_client, get_llm_client
 from services.data_service import (
     summarize_schema,
     generate_mock_recommendations,
@@ -212,11 +212,14 @@ def analyze_schema():
     if not os.path.exists(file_path):
         return jsonify({"error": "Uploaded file not found"}), 404
 
+    provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
+    model = data.get("model") or os.environ.get("LLM_MODEL") or "z-ai/glm-5.2"
+
     is_mock = (api_key == "MOCK")
-    client = None if is_mock else get_openai_client(api_key)
+    client = None if is_mock else get_llm_client(api_key=api_key, provider=provider, model=model)
 
     if not is_mock and not client:
-        return jsonify({"error": "Nvidia API key is required. Please set it in the settings panel."}), 400
+        return jsonify({"error": "API Key is required. Please set it in the settings panel."}), 400
 
     try:
         file_ext = file_id.rsplit('.', 1)[1].lower()
@@ -269,10 +272,10 @@ Return valid JSON only in this exact structure:
   ]
 }}
 """
-        logging.info("Requesting column recommendations from Nvidia GLM-5.2...")
+        logging.info(f"Requesting column recommendations from model {model}...")
         try:
             completion = client.chat.completions.create(
-                model="z-ai/glm-5.2",
+                model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.0,
                 top_p=1,
@@ -298,12 +301,12 @@ Return valid JSON only in this exact structure:
                 "chat_history": session_data["chat_history"]
             })
         except Exception as api_err:
-            logging.error(f"Nvidia API call failed, falling back to mock: {str(api_err)}")
+            logging.error(f"API call failed for model {model}, falling back to mock: {str(api_err)}")
             recommendations = generate_mock_recommendations(df, goal)
             col_actions = {r["column"]: {"action": r["action"], "reason": r["reason"], "transformation": r["transformation"]} for r in recommendations}
             session_data["column_actions"] = col_actions
 
-            fallback_msg = f"Goal set: **{goal}**.<br>⚠️ Nvidia API unavailable. Using offline recommendations fallback."
+            fallback_msg = f"Goal set: **{goal}**.<br>⚠️ API unavailable. Using offline recommendations fallback."
             session_data["chat_history"].append({"role": "user", "content": f"My data cleaning goal is: {goal}"})
             session_data["chat_history"].append({"role": "assistant", "content": fallback_msg})
             save_session(session_data)
@@ -311,7 +314,7 @@ Return valid JSON only in this exact structure:
             return jsonify({
                 "recommendations": recommendations,
                 "chat_history": session_data["chat_history"],
-                "warning": f"Nvidia API is currently experiencing issues ({str(api_err)}). Falling back to local offline recommendations."
+                "warning": f"AI API is currently experiencing issues ({str(api_err)}). Falling back to local offline recommendations."
             })
 
     except Exception as e:
@@ -554,8 +557,11 @@ def chat_session(session_id):
     # Append user message FIRST so it persists even on error
     session_data["chat_history"].append({"role": "user", "content": message})
 
+    provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
+    model = data.get("model") or os.environ.get("LLM_MODEL") or "z-ai/glm-5.2"
+
     is_mock = (api_key == "MOCK")
-    client = None if is_mock else get_openai_client(api_key)
+    client = None if is_mock else get_llm_client(api_key=api_key, provider=provider, model=model)
 
     def run_local_fallback(msg_lower, current_session):
         schema_updates = {}
@@ -632,9 +638,9 @@ If no changes are needed, return empty schema_updates {{}}.
 
         messages_for_model.append({"role": "user", "content": f"{system_prompt}\n\nUser message: {message}"})
 
-        logging.info("Sending chat query to Nvidia GLM-5.2...")
+        logging.info(f"Sending chat query to model {model}...")
         completion = client.chat.completions.create(
-            model="z-ai/glm-5.2",
+            model=model,
             messages=messages_for_model,
             temperature=0.2,
             top_p=1,
@@ -708,8 +714,11 @@ def chat_session_stream(session_id):
     session_data["chat_history"].append({"role": "user", "content": message})
     save_session(session_data)
 
+    provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
+    model = data.get("model") or os.environ.get("LLM_MODEL") or "z-ai/glm-5.2"
+
     is_mock = (api_key == "MOCK")
-    client = None if is_mock else get_openai_client(api_key)
+    client = None if is_mock else get_llm_client(api_key=api_key, provider=provider, model=model)
 
     def run_local_fallback_stream():
         """Local rule-based fallback that emits SSE events."""
@@ -796,7 +805,7 @@ If no changes are needed, respond conversationally and omit the block."""
 
         try:
             stream = client.chat.completions.create(
-                model="z-ai/glm-5.2",
+                model=model,
                 messages=messages_for_model,
                 temperature=0.3,
                 top_p=1,

@@ -189,3 +189,43 @@ def test_upload_and_flow(client):
     # Confirm it is deleted
     get_del_response = client.get(f'/api/sessions/{session_id}')
     assert get_del_response.status_code == 404
+
+
+def test_unified_llm_client_routing():
+    """Test the configuration and routing resolution logic of UnifiedLLMClient."""
+    from services.ai_service import UnifiedLLMClient
+
+    # Test automatic detection from model name
+    client1 = UnifiedLLMClient()
+
+    # OpenAI auto-routing
+    prov, name, key, url = client1.resolve_config("gpt-4o")
+    assert prov == "openai"
+    assert name == "openai/gpt-4o"
+
+    # Anthropic auto-routing
+    prov, name, key, url = client1.resolve_config("claude-3-7-sonnet")
+    assert prov == "anthropic"
+    assert name == "anthropic/claude-3-7-sonnet"
+
+    # Gemini auto-routing
+    prov, name, key, url = client1.resolve_config("gemini-2.5-flash")
+    assert prov == "gemini"
+    assert name == "gemini/gemini-2.5-flash"
+
+    # OpenRouter auto-routing
+    prov, name, key, url = client1.resolve_config("openrouter/meta/llama3")
+    assert prov == "openrouter"
+    assert name == "openrouter/meta/llama3"
+
+    # Ollama auto-routing
+    prov, name, key, url = client1.resolve_config("ollama/llama3")
+    assert prov == "ollama"
+    assert name == "ollama/llama3"
+    assert url == "http://localhost:11434"
+
+    # Explicit client-level provider and model
+    client2 = UnifiedLLMClient(provider="anthropic", model="custom-claude-model")
+    prov, name, key, url = client2.resolve_config(None)
+    assert prov == "anthropic"
+    assert name == "anthropic/custom-claude-model"
