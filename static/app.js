@@ -111,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTabs();
     initChatConsole();
     initSidebarHistory();
+    initPowerBIBuilder();
     
     // Attach buttons events
     els.newAnalysisBtn.addEventListener('click', startNewAnalysis);
@@ -1006,11 +1007,28 @@ function renderTablePreview(previewRows) {
     });
     thead.appendChild(headerRow);
     
-    previewRows.forEach(row => {
+    previewRows.forEach((row, rowIdx) => {
         const tr = document.createElement('tr');
         headers.forEach(h => {
             const td = document.createElement('td');
             td.textContent = row[h];
+            td.contentEditable = "true";
+            td.title = "Click to edit cell value directly";
+            td.style.cursor = "pointer";
+            td.addEventListener('blur', async () => {
+                const newVal = td.textContent.trim();
+                if (appState.activeSessionId) {
+                    try {
+                        await fetch(`/api/sessions/${appState.activeSessionId}/update_cell`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ row_index: rowIdx, column_name: h, new_value: newVal })
+                        });
+                    } catch (err) {
+                        console.error('Cell update failed:', err);
+                    }
+                }
+            });
             tr.appendChild(td);
         });
         tbody.appendChild(tr);
@@ -1233,8 +1251,11 @@ async function sendChatUserMessage() {
                                 if (els.processDataBtn) {
                                     els.processDataBtn.disabled = false;
                                 }
+                                if (parsed.trigger_reprocess) {
+                                    startStatusPolling(appState.activeSessionId, { mode: 'process' });
+                                    showBgProcessingIndicator(true);
+                                }
                             }
-                            // Do not auto-trigger processing from chat updates.
                             eventType = 'message'; // Reset for next event
 
                         } else if (eventType === 'done') {
@@ -1327,4 +1348,103 @@ async function compilePdfDiagnosticsReport() {
 
 function initSidebarHistory() {
     // Styling/scrolling helpers
+}
+
+function initPowerBIBuilder() {
+    const aiBtn = document.getElementById('ai-viz-btn');
+    const aiInput = document.getElementById('ai-viz-input');
+    const canvas = document.getElementById('dashboard-charts-grid');
+    const quickVizBtns = document.querySelectorAll('#ai-quick-viz-grid .bi-viz-btn');
+    
+    if(!aiBtn) return; // fail safe
+
+    quickVizBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const chartType = btn.dataset.type;
+            aiInput.value = `Make a ${chartType} of `;
+            aiInput.focus();
+        });
+    });
+
+    aiBtn.addEventListener('click', async () => {
+        const message = aiInput.value.trim();
+        if(!message) return alert('Please enter a request for the AI.');
+        if(!appState.activeSessionId) return alert('No active session.');
+
+        const originalBtnText = aiBtn.innerHTML;
+        aiBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating...';
+        aiBtn.disabled = true;
+
+        canvas.innerHTML = `
+            <div class="progress-container" style="width: 80%; max-width: 400px; text-align: center; margin: auto; padding-top: 20%;">
+                <h4 id="viz-progress-text" style="margin-bottom: 15px; color: var(--text-muted); font-weight: normal;">1. AI is analyzing your request...</h4>
+                <div class="progress-bar-bg" style="width: 100%; background: rgba(255,255,255,0.1); border-radius: 10px; height: 10px; overflow: hidden;">
+                    <div id="viz-progress-fill" style="width: 20%; background: var(--primary); height: 100%; border-radius: 10px; transition: width 0.4s ease;"></div>
+                </div>
+            </div>
+        `;
+
+        try {
+            // 1. Get chart parameters from AI
+            const aiRes = await fetch(`/api/sessions/${appState.activeSessionId}/viz_chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    api_key: appState.apiKey,
+                    provider: appState.provider,
+                    model: appState.model,
+                    base_url: appState.baseUrl
+                })
+            });
+            const aiData = await aiRes.json();
+            if(!aiRes.ok) throw new Error(aiData.error || 'Failed to parse AI request');
+            
+            const payload = aiData.params;
+            
+            // Update progress bar
+            const progText = document.getElementById('viz-progress-text');
+            const progFill = document.getElementById('viz-progress-fill');
+            if(progText) progText.innerText = "2. Rendering visual...";
+            if(progFill) progFill.style.width = "70%";
+            
+            // 2. Generate the chart
+            const res = await fetch(`/api/sessions/${appState.activeSessionId}/custom_chart`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if(!res.ok) throw new Error(data.error || 'Failed to generate visual');
+
+            if(progFill) progFill.style.width = "100%";
+            await new Promise(r => setTimeout(r, 200)); // smooth animation wait
+            
+            canvas.innerHTML = '';
+            
+            if (data.chart.type === 'image') {
+                const img = document.createElement('img');
+                img.src = `data:image/png;base64,${data.chart.data}`;
+                img.className = 'bi-chart-image fade-in';
+                canvas.appendChild(img);
+            } else if (data.chart.type === 'html') {
+                canvas.innerHTML = data.chart.data;
+            } else if (data.chart.type === 'plotly') {
+                const plotDiv = document.createElement('div');
+                plotDiv.id = `plotly-canvas-${Date.now()}`;
+                plotDiv.style.width = '100%';
+                plotDiv.style.height = '100%';
+                canvas.appendChild(plotDiv);
+                setTimeout(() => {
+                    Plotly.newPlot(plotDiv.id, data.chart.data.data, data.chart.data.layout);
+                }, 100);
+            }
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            aiBtn.innerHTML = originalBtnText;
+            aiBtn.disabled = false;
+            aiInput.value = '';
+        }
+    });
 }

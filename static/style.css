@@ -1621,4 +1621,125 @@ h1, h2, h3, h4, h5, h6 {
     white-space: nowrap;
 }
 
+/* Power BI Builder Styles */
+.bi-builder-container {
+    display: flex;
+    height: 600px;
+    gap: 15px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 15px;
+}
+
+.bi-sidebar {
+    width: 250px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    border-right: 1px solid var(--border-color);
+    padding-right: 15px;
+    overflow-y: auto;
+}
+
+.bi-sidebar h4 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.bi-visual-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 5px;
+}
+
+.bi-viz-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+    padding: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bi-viz-btn:hover {
+    background: rgba(255,255,255,0.05);
+    color: var(--text-light);
+}
+
+.bi-viz-btn.active {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.bi-field-wells {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.field-well {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.field-well label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.field-well select {
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    color: var(--text-light);
+    padding: 6px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    outline: none;
+}
+
+.field-well select:focus {
+    border-color: var(--primary);
+}
+
+.bi-canvas {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-dark);
+    border-radius: 8px;
+    overflow: hidden;
+    padding: 10px;
+}
+
+.bi-chart-display {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bi-placeholder {
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.bi-chart-image {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
 

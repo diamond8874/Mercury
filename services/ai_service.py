@@ -1,3 +1,4 @@
+from _pytest import cacheprovider
 import os
 import litellm
 import logging
@@ -60,28 +61,63 @@ class UnifiedLLMClient:
         Determines the correct provider, model identifier, API key, and base URL.
         """
         # Resolve target model name
-        model_name = requested_model or self.model or os.environ.get("LLM_MODEL") or "z-ai/glm-5.2"
+        model_name = requested_model or self.model or os.environ.get("LLM_MODEL")
+        
+        # If no model is explicitly requested, auto-select based on available API keys
+        if not model_name or model_name.strip() == "":
+            if self.api_key or os.environ.get("NVIDIA_API_KEY"):
+                model_name = "meta/llama-3.3-70b-instruct"
+            elif os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+                model_name = "gemini-2.5-flash"
+            elif os.environ.get("GROQ_API_KEY"):
+                model_name = "llama-3.3-70b-versatile"
+            elif os.environ.get("OPENAI_API_KEY"):
+                model_name = "gpt-4o-mini"
+            elif os.environ.get("ANTHROPIC_API_KEY"):
+                model_name = "claude-3-5-haiku-20241022"
+            else:
+                model_name = "meta/llama-3.3-70b-instruct"
+
         model_lower = model_name.lower()
 
-        # Resolve provider
-        provider = self.provider or os.environ.get("LLM_PROVIDER")
-        if not provider:
+        # Check if model has a provider prefix like "gemini/gemini-1.5-flash" or "groq/llama-3.3-70b-versatile"
+        detected_provider = None
+        if "/" in model_name:
+            prefix = model_name.split("/")[0].lower()
+            if prefix in ["openai", "anthropic", "gemini", "google", "groq", "openrouter", "ollama", "nvidia"]:
+                detected_provider = "gemini" if prefix in ["google", "google-gemini"] else prefix
+
+        if not detected_provider:
             if "claude" in model_lower:
-                provider = "anthropic"
+                detected_provider = "anthropic"
             elif "gemini" in model_lower:
-                provider = "gemini"
+                detected_provider = "gemini"
             elif "openrouter" in model_lower:
-                provider = "openrouter"
+                detected_provider = "openrouter"
             elif "ollama" in model_lower:
-                provider = "ollama"
-            elif "gpt-" in model_lower:
+                detected_provider = "ollama"
+            elif "gpt-" in model_lower or "gpt" in model_lower:
+                detected_provider = "openai"
+            elif "glm" in model_lower or "nvidia" in model_lower or "nemotron" in model_lower:
+                detected_provider = "nvidia"
+
+        # Resolve provider: Model-based auto-detection takes precedence if explicit model implies a provider
+        provider = detected_provider or self.provider or os.environ.get("LLM_PROVIDER")
+        if not provider or provider.strip() == "":
+            if "gemini" in model_lower:
+                provider = "gemini"
+            elif "groq" in model_lower or "llama" in model_lower:
+                provider = "groq"
+            elif "gpt" in model_lower or "openai" in model_lower:
                 provider = "openai"
-            elif "glm" in model_lower or "nvidia" in model_lower:
+            elif "nvidia" in model_lower or "nemotron" in model_lower or "glm" in model_lower:
                 provider = "nvidia"
             else:
-                provider = "nvidia"  # Default fallback
+                provider = "nvidia"
 
         provider = provider.lower()
+        if provider in ["google", "google-gemini"]:
+            provider = "gemini"
 
         # Resolve API key and Base URL based on resolved provider
         api_key = self.api_key
@@ -101,8 +137,10 @@ class UnifiedLLMClient:
 
         elif provider == "gemini":
             if not api_key:
-                api_key = os.environ.get("GEMINI_API_KEY")
-            if not model_name.startswith("gemini/"):
+                api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            if model_name.startswith("gemini/gemini/"):
+                model_name = model_name[7:]
+            elif not model_name.startswith("gemini/"):
                 model_name = f"gemini/{model_name}"
 
         elif provider == "openrouter":
@@ -119,10 +157,28 @@ class UnifiedLLMClient:
 
         elif provider == "nvidia":
             if not api_key:
-                api_key = os.environ.get("NVIDIA_API_KEY") or "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"
-            base_url = "https://integrate.api.nvidia.com/v1"
-            if not model_name.startswith("openai/"):
-                model_name = f"openai/{model_name}"
+                api_key = os.environ.get("NVIDIA_API_KEY")
+            if not api_key:
+                raise ValueError("NVIDIA_API_KEY not set")
+            if not base_url:
+                base_url = "https://integrate.api.nvidia.com/v1"
+            
+            clean_name = model_name.replace("openai/", "")
+            model_mapping = {
+                "nemotron": "nvidia/nemotron-3.5-lightning-30b-a3b",
+                "nemotron-3.5-lightning": "nvidia/nemotron-3.5-lightning-30b-a3b",
+                "llama3": "meta/llama-3.3-70b-instruct",
+                "llama-3.3-70b": "meta/llama-3.3-70b-instruct",
+                "glm-5.2": "z-ai/glm-5.2"
+            }
+            mapped_name = model_mapping.get(clean_name.lower(), clean_name)
+            model_name = f"openai/{mapped_name}"
+
+        elif provider == "groq":
+            if not api_key:
+                api_key = os.environ.get("GROQ_API_KEY")
+            if not model_name.startswith("groq/"):
+                model_name = f"groq/{model_name}"
 
         else:
             # Fallback for custom / OpenAI-compatible endpoint

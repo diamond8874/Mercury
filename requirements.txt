@@ -6,3 +6,10 @@ python-dotenv==1.0.1
 matplotlib
 reportlab
 litellm
+squarify
+plotly
+geopandas
+folium
+seaborn
+scikit-learn
+waterfallcharts

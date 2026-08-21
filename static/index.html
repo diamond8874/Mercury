@@ -205,8 +205,38 @@
                                 
                                 <!-- TAB 3: Charts -->
                                 <div class="tab-pane" id="tab-viz">
-                                    <div class="charts-grid" id="dashboard-charts-grid">
-                                        <!-- Dynamic canvas items -->
+                                    <div class="bi-builder-container">
+                                        <!-- Left Sidebar: AI Visual Builder -->
+                                        <div class="bi-sidebar" style="display: flex; flex-direction: column;">
+                                            <h4>AI Visual Builder</h4>
+                                            <p class="text-muted" style="font-size: 0.85rem; margin-bottom: 10px;">
+                                                Select a visual type, or type what you want to see.
+                                            </p>
+                                            
+                                            <!-- Quick Select Options -->
+                                            <div class="bi-visual-grid" id="ai-quick-viz-grid" style="margin-bottom: 15px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;">
+                                                <button class="bi-viz-btn" data-type="Bar Chart" title="Bar Chart"><i class="fa-solid fa-chart-bar"></i></button>
+                                                <button class="bi-viz-btn" data-type="Line Chart" title="Line Chart"><i class="fa-solid fa-chart-line"></i></button>
+                                                <button class="bi-viz-btn" data-type="Pie Chart" title="Pie Chart"><i class="fa-solid fa-chart-pie"></i></button>
+                                                <button class="bi-viz-btn" data-type="Scatter Plot" title="Scatter Chart"><i class="fa-solid fa-braille"></i></button>
+                                                <button class="bi-viz-btn" data-type="Histogram" title="Histogram"><i class="fa-solid fa-chart-column"></i></button>
+                                            </div>
+
+                                            <div class="ai-viz-prompt-area" style="display: flex; flex-direction: column; gap: 10px; flex-grow: 1;">
+                                                <textarea id="ai-viz-input" class="chat-input" placeholder="e.g. average MSRP by Model Year" style="flex-grow: 1; resize: none; border-radius: 8px; padding: 10px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); min-height: 100px; font-family: inherit;"></textarea>
+                                                <button class="btn btn-primary" id="ai-viz-btn" style="width: 100%;"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate Visual</button>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Main Canvas -->
+                                        <div class="bi-canvas">
+                                            <div id="dashboard-charts-grid" class="bi-chart-display">
+                                                <div class="bi-placeholder">
+                                                    <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 3rem; margin-bottom: 1rem; color: var(--text-muted)"></i>
+                                                    <p>Select a visual type and assign fields to render a chart.</p>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 
@@ -269,13 +299,14 @@
                 <div class="form-group">
                     <label for="settings-provider">LLM Provider:</label>
                     <select id="settings-provider" class="form-select" style="width: 100%; padding: 0.75rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
-                        <option value="">Default (NVIDIA / Auto-detect)</option>
+                        <option value="">Default (Groq / Auto-detect)</option>
                         <option value="openai">OpenAI</option>
                         <option value="anthropic">Anthropic (Claude)</option>
                         <option value="gemini">Google (Gemini)</option>
                         <option value="openrouter">OpenRouter</option>
                         <option value="ollama">Ollama (Local)</option>
                         <option value="nvidia">Nvidia API</option>
+                        <option value="groq">Groq API</option>
                     </select>
                 </div>
 
@@ -321,7 +352,7 @@
             </div>
             
             <h3 id="loader-title">Analyzing data...</h3>
-            <p id="loader-subtitle">Please wait, Nvidia GLM-5.2 is examining your schema.</p>
+            <p id="loader-subtitle">Please wait, AI model is examining your schema.</p>
 
             <!-- Progressive Progress Bar -->
             <div class="progress-bar-container">
@@ -341,7 +372,7 @@
                 </div>
                 <div class="progress-step-item" id="step-marker-3">
                     <span class="step-dot"></span>
-                    <span class="step-label">Consulting Nvidia GLM-5.2 AI model</span>
+                    <span class="step-label">Consulting AI model</span>
                 </div>
                 <div class="progress-step-item" id="step-marker-4">
                     <span class="step-dot"></span>

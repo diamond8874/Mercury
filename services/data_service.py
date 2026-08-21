@@ -29,47 +29,29 @@ def summarize_schema(df, max_samples=1):
 # Mock AI Recommendations Fallback
 def generate_mock_recommendations(df, goal):
     recommendations = []
+    goal_lower = (goal or "").lower()
     for col in df.columns:
         col_lower = col.lower()
-        if "id" in col_lower or "hash" in col_lower:
+        
+        # Check if user explicitly requested action for this column in goal
+        user_wants_drop = col_lower in goal_lower and any(kw in goal_lower for kw in ["drop", "remove", "delete", "omit", "eliminate"])
+        user_wants_keep = col_lower in goal_lower and any(kw in goal_lower for kw in ["keep", "retain", "include", "save"])
+
+        if user_wants_drop:
             action = "drop"
-            reason = f"Useless random identifier. High cardinality and zero correlation to goal '{goal}'."
+            reason = f"Explicitly requested to drop column '{col}' based on user goal."
             trans = None
-        elif "name" in col_lower:
-            action = "drop"
-            reason = "Personally identifiable information (PII) that doesn't aid model training."
-            trans = None
-        elif "noise" in col_lower or "system" in col_lower:
-            action = "drop"
-            reason = "Synthetic noise column representing non-predictive random signals."
-            trans = None
-        elif "empty" in col_lower or "null" in col_lower:
-            action = "drop"
-            reason = "Empty column with 100% missing values."
-            trans = None
-        elif "duplicated" in col_lower:
-            action = "drop"
-            reason = "Duplicate copy of fee column. Redundant features cause multicollinearity."
-            trans = None
-        elif "date" in col_lower:
-            action = "transform"
-            reason = "Date string needs to be parsed to allow extraction of chronological metrics like tenure."
-            trans = "Convert to datetime object"
-        elif col_lower in ["gender", "sex"]:
-            action = "transform"
-            reason = "Categorical string column with missing values. Requires imputation and label encoding."
-            trans = "Impute missing with mode and label encode"
-        elif col_lower in ["age", "income"]:
-            action = "transform"
-            reason = "Numeric column containing missing values that need numerical imputation."
-            trans = "Impute missing values using column median"
-        elif col_lower in ["churn", "churned", "churned_status", "status"]:
+        elif user_wants_keep:
             action = "keep"
-            reason = "Direct target label representing the classification outcome."
+            reason = f"Explicitly requested to keep column '{col}' based on user goal."
+            trans = None
+        elif df[col].isnull().all():
+            action = "drop"
+            reason = "Column contains 100% missing values."
             trans = None
         else:
             action = "keep"
-            reason = "Key numerical or categorical feature directly relevant to predicting user behavior."
+            reason = "Retained column by default. Will only modify if requested."
             trans = None
 
         recommendations.append({
@@ -110,6 +92,146 @@ def generate_mock_charts(df):
             "description": "Shows the breakdown of customers by gender category."
         })
     return charts
+
+def apply_column_transformation(df, col, trans):
+    """
+    Executes advanced, versatile column transformations specified by AI or user prompts.
+    Supports:
+    - String cases & cleaning: upper, lower, title, strip, clean currency/symbols
+    - Numeric conversions & imputations: mean, median, mode, zero, coerce numeric
+    - Encoding: label encoding, category codes
+    - Date/Time parsing & feature extraction: year, month, datetime formatting
+    - Scaling & Math: min-max normalization, z-score standardization, log transform, rounding
+    """
+    if col not in df.columns:
+        return df, f"Column '{col}' not found"
+
+    trans_str = (trans or "").lower().strip()
+    import re
+
+    # 0. Value Replacement / Cell Mapping (e.g., "replace 'Tesla' with 'Tesla Motors'", "change 'NY' to 'New York'")
+    replace_match = re.search(r"(?:replace|substitute|change|rename|map)\s+(?:value\s+)?['\"]?([^'\"]+?)['\"]?\s+(?:with|to|->)\s+['\"]?([^'\"]+?)['\"]?$", trans_str, re.IGNORECASE)
+    if replace_match:
+        old_val, new_val = replace_match.group(1).strip(), replace_match.group(2).strip()
+        # Convert df column to string for consistent text value replacement
+        df[col] = df[col].astype(str).replace(old_val, new_val)
+        # Also try case-insensitive replace if string match
+        df[col] = df[col].replace(to_replace=r'(?i)^' + re.escape(old_val) + r'$', value=new_val, regex=True)
+        return df, f"Replaced cell values '{old_val}' with '{new_val}' in '{col}'"
+
+    # Custom missing value fill (e.g., "fill missing with 'None'")
+    if any(k in trans_str for k in ['fill missing', 'replace missing', 'impute missing']) and not any(k in trans_str for k in ['mean', 'median', 'mode']):
+        fill_match = re.search(r"(?:with|to)\s+['\"]?([^'\"]+?)['\"]?$", trans_str, re.IGNORECASE)
+        fill_val = fill_match.group(1).strip() if fill_match else "Unknown"
+        df[col] = df[col].fillna(fill_val)
+        return df, f"Filled missing values in '{col}' with '{fill_val}'"
+
+    # Row Operations / Outlier / Duplicate Handling
+    if any(k in trans_str for k in ['drop duplicate', 'remove duplicate', 'deduplicate']):
+        df = df.drop_duplicates(subset=[col])
+        return df, f"Removed duplicate rows based on column '{col}'"
+    elif any(k in trans_str for k in ['drop na rows', 'remove missing rows', 'drop null rows', 'drop empty rows']):
+        df = df.dropna(subset=[col])
+        return df, f"Dropped rows with missing values in column '{col}'"
+    elif any(k in trans_str for k in ['outlier', 'clip', 'trim outliers']):
+        if pd.api.types.is_numeric_dtype(df[col]):
+            q1, q3 = df[col].quantile(0.01), df[col].quantile(0.99)
+            df[col] = df[col].clip(lower=q1, upper=q3)
+            return df, f"Clipped 1st-99th percentile outliers in '{col}'"
+
+    # 1. Date & Time Transformations
+    if any(k in trans_str for k in ['date', 'datetime', 'time', 'timestamp']):
+        if 'year' in trans_str:
+            df[f"{col}_year"] = pd.to_datetime(df[col], errors='coerce').dt.year
+            return df, f"Extracted year from '{col}' into '{col}_year'"
+        elif 'month' in trans_str:
+            df[f"{col}_month"] = pd.to_datetime(df[col], errors='coerce').dt.month
+            return df, f"Extracted month from '{col}' into '{col}_month'"
+        else:
+            import datetime
+            def _parse_val(v):
+                if pd.isna(v) or v is None: return ""
+                v_str = str(v).strip()
+                for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                    try:
+                        dt = datetime.datetime.strptime(v_str, fmt)
+                        return dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception: pass
+                return v_str
+            df[col] = df[col].apply(_parse_val)
+            return df, f"Standardized datetime in '{col}'"
+
+    # 2. String & Text Case Transformations
+    elif any(k in trans_str for k in ['upper', 'uppercase']):
+        df[col] = df[col].astype(str).str.upper()
+        return df, f"Converted '{col}' to uppercase"
+    elif any(k in trans_str for k in ['lower', 'lowercase']):
+        df[col] = df[col].astype(str).str.lower()
+        return df, f"Converted '{col}' to lowercase"
+    elif any(k in trans_str for k in ['title', 'titlecase', 'capitalize']):
+        df[col] = df[col].astype(str).str.title()
+        return df, f"Capitalized '{col}'"
+    elif any(k in trans_str for k in ['strip', 'trim', 'whitespace']):
+        df[col] = df[col].astype(str).str.strip()
+        return df, f"Cleaned whitespace in '{col}'"
+
+    # 3. Currency / Symbol Cleaning
+    elif any(k in trans_str for k in ['currency', 'symbol', 'price', '$', 'dollar', 'strip symbols']):
+        df[col] = df[col].astype(str).str.replace(r'[\$,€,£,,\s]', '', regex=True)
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+        return df, f"Cleaned currency symbols and converted '{col}' to numeric"
+
+    # 4. Encoding
+    elif any(k in trans_str for k in ['encode', 'label encode', 'category', 'factorize']):
+        df[col] = df[col].astype('category').cat.codes
+        return df, f"Label-encoded categorical column '{col}'"
+
+    # 5. Imputation Strategies
+    elif 'mean' in trans_str:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+        df[col] = df[col].fillna(df[col].mean())
+        return df, f"Imputed missing in '{col}' with column mean"
+    elif 'median' in trans_str:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+        df[col] = df[col].fillna(df[col].median())
+        return df, f"Imputed missing in '{col}' with column median"
+    elif 'mode' in trans_str:
+        mode_val = df[col].mode()[0] if not df[col].mode().empty else "Unknown"
+        df[col] = df[col].fillna(mode_val)
+        return df, f"Imputed missing in '{col}' with mode"
+    elif any(k in trans_str for k in ['zero', 'fill 0', '0']):
+        df[col] = df[col].fillna(0)
+        return df, f"Filled missing in '{col}' with 0"
+
+    # 6. Scaling, Normalization & Math
+    elif any(k in trans_str for k in ['normalize', 'min-max', 'minmax', 'scale']):
+        numeric_series = pd.to_numeric(df[col], errors='coerce')
+        min_v, max_v = numeric_series.min(), numeric_series.max()
+        if max_v != min_v:
+            df[col] = (numeric_series - min_v) / (max_v - min_v)
+        return df, f"Applied Min-Max scaling to '{col}'"
+    elif any(k in trans_str for k in ['standardize', 'z-score', 'zscore']):
+        numeric_series = pd.to_numeric(df[col], errors='coerce')
+        std_v = numeric_series.std()
+        if std_v != 0:
+            df[col] = (numeric_series - numeric_series.mean()) / std_v
+        return df, f"Standardized '{col}' with Z-score"
+    elif 'log' in trans_str:
+        import numpy as np
+        df[col] = np.log1p(pd.to_numeric(df[col], errors='coerce').clip(lower=0))
+        return df, f"Applied Log(1+x) transformation to '{col}'"
+    elif any(k in trans_str for k in ['round', 'integer', 'int']):
+        df[col] = pd.to_numeric(df[col], errors='coerce').round()
+        return df, f"Rounded '{col}' to integers"
+
+    # Default / Fallback numeric or string imputation
+    elif pd.api.types.is_numeric_dtype(df[col]):
+        df[col] = df[col].fillna(df[col].median())
+        return df, f"Imputed missing in '{col}' with median"
+    else:
+        df[col] = df[col].fillna("Unknown")
+        return df, f"Imputed missing in '{col}' with 'Unknown'"
+
 
 def run_background_process(app, session_id, api_key=None):
     """
@@ -157,19 +279,8 @@ def run_background_process(app, session_id, api_key=None):
                     columns_to_drop.append(col)
                 elif action == 'transform':
                     try:
-                        if trans and ('date' in trans.lower() or 'time' in trans.lower()):
-                            df[col] = pd.to_datetime(df[col], errors='coerce')
-                        elif trans and any(k in trans.lower() for k in ['numeric', 'number', 'float', 'int']):
-                            df[col] = pd.to_numeric(df[col], errors='coerce')
-                            if any(k in trans.lower() for k in ['impute', 'fill', 'missing']):
-                                df[col] = df[col].fillna(df[col].median())
-                        elif pd.api.types.is_numeric_dtype(df[col]):
-                            if df[col].isnull().any():
-                                df[col] = df[col].fillna(df[col].median())
-                        else:
-                            if df[col].isnull().any():
-                                df[col] = df[col].fillna("Unknown")
-                        transform_actions.append(f"Transformed '{col}': {trans or 'imputed'}")
+                        df, msg = apply_column_transformation(df, col, trans)
+                        transform_actions.append(msg)
                     except Exception as tex:
                         logging.warning(f"BG transform error {col}: {tex}")
                 else:
@@ -255,7 +366,9 @@ def run_background_process(app, session_id, api_key=None):
                     logging.warning(f"BG chart data error {title}: {cde}")
 
             _update_job_progress(session_id, 95, "Compiling final table previews, statistics, and reports...")
-            preview_data = df.head(10).fillna("").to_dict(orient='records')
+            df_preview = df.head(10).copy().astype(object)
+            df_preview = df_preview.where(pd.notnull(df_preview), "")
+            preview_data = df_preview.to_dict(orient='records')
 
             result_payload = {
                 "download_url": f"/api/download/{output_filename}",

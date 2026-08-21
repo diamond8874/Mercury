@@ -28,21 +28,29 @@ def get_session_folder():
         pass
     return config.SESSION_FOLDER
 
+import time
+
 def load_session(session_id):
     path = os.path.join(get_session_folder(), f"{session_id}.json")
     if os.path.exists(path):
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logging.error(f"Error loading session JSON: {str(e)}")
+        for attempt in range(3):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                time.sleep(0.05)
+                if attempt == 2:
+                    logging.error(f"Error loading session JSON: {str(e)}")
     return None
 
 def save_session(session_data):
     session_id = session_data['session_id']
-    path = os.path.join(get_session_folder(), f"{session_id}.json")
+    folder = get_session_folder()
+    path = os.path.join(folder, f"{session_id}.json")
+    tmp_path = os.path.join(folder, f"{session_id}.tmp")
     try:
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(session_data, f, cls=CustomJSONEncoder, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, path)
     except Exception as e:
         logging.error(f"Error saving session JSON: {str(e)}")

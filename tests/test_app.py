@@ -106,8 +106,19 @@ def test_upload_and_flow(client):
     )
     assert analyze_response.status_code == 200
     analyze_data = analyze_response.get_json()
-    assert "recommendations" in analyze_data
-    assert len(analyze_data["recommendations"]) > 0
+    assert analyze_data.get("status") == "queued"
+
+    # Poll session detail until background analyze completes and recommendations are populated
+    import time
+    for _ in range(10):
+        detail_response = client.get(f'/api/sessions/{session_id}')
+        assert detail_response.status_code == 200
+        detail = detail_response.get_json()
+        if "recommendations" in detail and len(detail["recommendations"]) > 0:
+            break
+        time.sleep(0.5)
+    else:
+        pytest.fail("Background analyze job did not populate recommendations in time")
 
     # 6. Chat with the assistant (using MOCK)
     chat_payload = {

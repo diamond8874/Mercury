@@ -41,15 +41,15 @@ Mercury uses a clean, decoupled **Adapter/Factory Pattern** to resolve, configur
 |-------------|------|-------------|--------------|
 | `app.py` | Flask Entrypoint | Lean main entry point for booting and initializing the Flask application. | `flask`, `config`, `components.routes`, `utils.fonts` |
 | `config.py` | Configuration | Defines folder paths, extension restrictions, and loads environment variables. | `os`, `dotenv` |
-| `components/routes.py` | Blueprint Routes | Refactored routes parsing custom LLM states (provider, model, keys) for schema analysis and streaming chat sessions. | `flask`, `pandas`, `numpy`, `matplotlib`, `reportlab`, `services`, `utils` |
-| `services/ai_service.py` | Service | Contains `UnifiedLLMClient` implementing multi-provider LLM routing, auto-resolving, and LiteLLM compatibility. | `litellm`, `os`, `logging` |
-| `services/data_service.py` | Service | Core data operations, schema summary, mock suggestions, and background worker threads. | `pandas`, `numpy`, `os`, `logging`, `utils` |
+| `components/routes.py` | Blueprint Routes | Refactored routes parsing custom LLM states (provider, model, keys) for schema analysis, streaming chat sessions, `/api/sessions/<id>/update_cell` endpoint, and multi-column safety net parsing. | `flask`, `pandas`, `numpy`, `matplotlib`, `reportlab`, `services`, `utils` |
+| `services/ai_service.py` | Service | Contains `UnifiedLLMClient` implementing multi-provider LLM routing, auto-resolving, LiteLLM compatibility, and OpenAI base URL routing for Nvidia (`https://integrate.api.nvidia.com/v1`). | `litellm`, `os`, `logging` |
+| `services/data_service.py` | Service | Core data operations, versatile `apply_column_transformation` engine (string cleaning, currency stripping, cell value replacement `replace 'X' with 'Y'`, imputation, scaling, feature extraction), schema summary, mock suggestions, and background worker threads. | `pandas`, `numpy`, `os`, `logging`, `utils` |
 | `utils/helpers.py` | Utility Helper | Functions for filename validation and JSON response parsing. | `json`, `config` |
-| `utils/session_manager.py` | Session Utility | Session load/save and custom JSON encoder to serialize pandas/numpy objects. | `json`, `os`, `pandas`, `numpy`, `flask`, `config` |
+| `utils/session_manager.py` | Session Utility | Atomic session load/save with `.tmp` file replacement and custom JSON encoder to serialize pandas/numpy objects cleanly. | `json`, `os`, `pandas`, `numpy`, `flask`, `config` |
 | `utils/fonts.py` | PDF Font Utility | Core downloader and registrar for PDF report fonts. | `os`, `urllib`, `reportlab` |
 | `utils/job_tracker.py` | Job Tracking Utility | Thread-safe tracking and polling of background cleaning jobs. | `threading` |
 | `generate_test_data.py` | Script | Generates a synthetic dataset for testing data cleaning capabilities. | `pandas`, `numpy`, `random` |
-| `static/app.js` | Frontend JS | Handles dynamic settings state storage (`localStorage`), settings modal save handlers, and sends custom LLM parameters in API requests. | None |
+| `static/app.js` | Frontend JS | Handles dynamic settings state storage (`localStorage`), settings modal save handlers, `contentEditable` interactive cell editing in data preview table, and sends custom LLM parameters in API requests. | None |
 | `static/index.html` | Frontend UI | Re-architected settings panel enabling selection of LLM Providers (OpenAI, Anthropic, Gemini, Ollama, OpenRouter, Nvidia) and Model names. | `static/style.css`, `static/app.js` |
 
 ---
@@ -60,11 +60,11 @@ The LLM abstraction dynamically routes API calls. It checks settings sent from t
 
 | Environment Variable | Provider Target | Usage / Description |
 |----------------------|-----------------|---------------------|
-| `NVIDIA_API_KEY` | NVIDIA / Legacy | Default API Key used for Nvidia endpoints (`z-ai/glm-5.2`). |
+| `NVIDIA_API_KEY` | NVIDIA | Default API Key used for Nvidia endpoints (e.g. `meta/llama-3.3-70b-instruct`). |
 | `OPENAI_API_KEY` | OpenAI | API Key for authenticating with official OpenAI models (e.g. `gpt-4o`). |
 | `ANTHROPIC_API_KEY` | Anthropic | API Key for authenticating with Anthropic Claude models (e.g. `claude-3-7-sonnet`). |
 | `GEMINI_API_KEY` | Google Gemini | API key for authenticating with Google Gemini models (e.g. `gemini-2.5-flash`). |
 | `OPENROUTER_API_KEY` | OpenRouter | API key for routing requests through OpenRouter. |
 | `OLLAMA_BASE_URL` | Ollama (Local) | Custom local base URL (defaults to `http://localhost:11434`). |
 | `LLM_PROVIDER` | System Default | Default provider to use if none is selected in the UI (e.g., `nvidia`, `openai`). |
-| `LLM_MODEL` | System Default | Default model to use if none is specified (defaults to `z-ai/glm-5.2`). |
+| `LLM_MODEL` | System Default | Default model to use if none is specified (defaults to `meta/llama-3.3-70b-instruct`). |
