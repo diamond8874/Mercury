@@ -20,7 +20,7 @@ def render_pie_chart(df: pd.DataFrame, label_col: str, value_col: str, top_n: in
         other_data = pd.Series([data.iloc[top_n:].sum()], index=['Other'])
         data = pd.concat([top_data, other_data])
 
-    wedges, texts, autotexts = ax.pie(data, labels=data.index, autopct='%1.1f%%', startangle=90, textprops={'color': 'lightgray'}, pctdistance=0.85)
+    ax.pie(data, labels=data.index, autopct='%1.1f%%', startangle=90, textprops={'color': 'lightgray'}, pctdistance=0.85)
     
     # Optional: adjust label distance or use legend if labels overlap, but top 10 usually fits well
     ax.set_title(f"Pie Chart: {value_col} by {label_col}", color='white')
@@ -38,8 +38,8 @@ def render_donut_chart(df: pd.DataFrame, label_col: str, value_col: str, top_n: 
         other_data = pd.Series([data.iloc[top_n:].sum()], index=['Other'])
         data = pd.concat([top_data, other_data])
 
-    wedges, texts, autotexts = ax.pie(data, labels=data.index, autopct='%1.1f%%', startangle=90, 
-                                      textprops={'color': 'lightgray'}, pctdistance=0.85, wedgeprops=dict(width=0.4, edgecolor='w'))
+    ax.pie(data, labels=data.index, autopct='%1.1f%%', startangle=90, 
+           textprops={'color': 'lightgray'}, pctdistance=0.85, wedgeprops=dict(width=0.4, edgecolor='w'))
     ax.set_title(f"Donut Chart: {value_col} by {label_col}", color='white')
     fig.patch.set_alpha(0.0)
     ax.patch.set_alpha(0.0)

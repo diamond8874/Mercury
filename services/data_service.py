@@ -1,9 +1,13 @@
 import os
 import logging
+import re
+import difflib
 import pandas as pd
 import numpy as np
 from utils.session_manager import load_session, save_session
 from utils.job_tracker import _set_job_state, _update_job_progress
+from services.cleaning import build_cleaning_plan, validate_plan, execute_plan
+
 
 # Schema summarization helper for more compact AI prompts
 def summarize_schema(df, max_samples=1):
@@ -30,17 +34,39 @@ def summarize_schema(df, max_samples=1):
 def generate_mock_recommendations(df, goal):
     recommendations = []
     goal_lower = (goal or "").lower()
+
+    # Exclude global phrases like "remove duplicates", "remove nulls" from triggering column drops
+    clean_goal_for_drop = re.sub(
+        r'\b(remove|drop|delete)\s+(duplicates?|nulls?|nans?|missing|rows?|placeholders?|outliers?|invalid|bad)\b',
+        '',
+        goal_lower,
+        flags=re.IGNORECASE
+    )
+
     for col in df.columns:
         col_lower = col.lower()
-        
-        # Check if user explicitly requested action for this column in goal
-        user_wants_drop = col_lower in goal_lower and any(kw in goal_lower for kw in ["drop", "remove", "delete", "omit", "eliminate"])
-        user_wants_keep = col_lower in goal_lower and any(kw in goal_lower for kw in ["keep", "retain", "include", "save"])
+        col_spaced = col_lower.replace('_', ' ')
+        col_pattern = rf"\b(?:{re.escape(col_lower)}|{re.escape(col_spaced)})\b"
+
+        # Explicit column mention check
+        has_col_mention = bool(re.search(col_pattern, clean_goal_for_drop))
+
+        user_wants_drop = False
+        if has_col_mention:
+            drop_verb_pattern = rf"\b(?:drop|remove|delete|omit|eliminate)\b.*\b(?:{re.escape(col_lower)}|{re.escape(col_spaced)})\b|\b(?:{re.escape(col_lower)}|{re.escape(col_spaced)})\b.*\b(?:drop|remove|delete|omit|eliminate)\b"
+            user_wants_drop = bool(re.search(drop_verb_pattern, clean_goal_for_drop))
+
+        user_wants_keep = has_col_mention and any(kw in goal_lower for kw in ["keep", "retain", "include", "save"])
+        user_wants_trans = has_col_mention and any(kw in goal_lower for kw in ["transform", "tranform", "convert", "replace", "change", "impute", "->", "=>"])
 
         if user_wants_drop:
             action = "drop"
             reason = f"Explicitly requested to drop column '{col}' based on user goal."
             trans = None
+        elif user_wants_trans:
+            action = "transform"
+            reason = f"Explicitly requested transformation for column '{col}' in goal prompt."
+            trans = goal
         elif user_wants_keep:
             action = "keep"
             reason = f"Explicitly requested to keep column '{col}' based on user goal."
@@ -61,6 +87,7 @@ def generate_mock_recommendations(df, goal):
             "transformation": trans
         })
     return recommendations
+
 
 def generate_mock_charts(df):
     final_cols = list(df.columns)
@@ -93,144 +120,134 @@ def generate_mock_charts(df):
         })
     return charts
 
-def apply_column_transformation(df, col, trans):
+import difflib
+
+def match_column_name(target_col: str, text: str) -> bool:
     """
-    Executes advanced, versatile column transformations specified by AI or user prompts.
-    Supports:
-    - String cases & cleaning: upper, lower, title, strip, clean currency/symbols
-    - Numeric conversions & imputations: mean, median, mode, zero, coerce numeric
-    - Encoding: label encoding, category codes
-    - Date/Time parsing & feature extraction: year, month, datetime formatting
-    - Scaling & Math: min-max normalization, z-score standardization, log transform, rounding
+    Smart fuzzy column matcher that detects column names in user prompts
+    even with UK/US spelling differences (behavioural vs behavioral), 
+    singular/plural variations, spaces vs underscores, typos, or partial phrases.
     """
-    if col not in df.columns:
-        return df, f"Column '{col}' not found"
+    if not target_col or not text:
+        return False
 
-    trans_str = (trans or "").lower().strip()
-    import re
+    col_lower = target_col.lower()
+    col_clean = re.sub(r'[^a-z0-9]', '', col_lower)
+    text_lower = text.lower()
+    text_clean = re.sub(r'[^a-z0-9]', ' ', text_lower)
 
-    # 0. Value Replacement / Cell Mapping (e.g., "replace 'Tesla' with 'Tesla Motors'", "change 'NY' to 'New York'")
-    replace_match = re.search(r"(?:replace|substitute|change|rename|map)\s+(?:value\s+)?['\"]?([^'\"]+?)['\"]?\s+(?:with|to|->)\s+['\"]?([^'\"]+?)['\"]?$", trans_str, re.IGNORECASE)
-    if replace_match:
-        old_val, new_val = replace_match.group(1).strip(), replace_match.group(2).strip()
-        # Convert df column to string for consistent text value replacement
-        df[col] = df[col].astype(str).replace(old_val, new_val)
-        # Also try case-insensitive replace if string match
-        df[col] = df[col].replace(to_replace=r'(?i)^' + re.escape(old_val) + r'$', value=new_val, regex=True)
-        return df, f"Replaced cell values '{old_val}' with '{new_val}' in '{col}'"
+    # 1. Direct or clean string substring match
+    if col_lower in text_lower or col_clean in re.sub(r'[^a-z0-9]', '', text_lower):
+        return True
 
-    # Custom missing value fill (e.g., "fill missing with 'None'")
-    if any(k in trans_str for k in ['fill missing', 'replace missing', 'impute missing']) and not any(k in trans_str for k in ['mean', 'median', 'mode']):
-        fill_match = re.search(r"(?:with|to)\s+['\"]?([^'\"]+?)['\"]?$", trans_str, re.IGNORECASE)
-        fill_val = fill_match.group(1).strip() if fill_match else "Unknown"
-        df[col] = df[col].fillna(fill_val)
-        return df, f"Filled missing values in '{col}' with '{fill_val}'"
+    # 2. Word & N-gram fuzzy matching
+    words = [re.sub(r'[^a-z0-9]', '', w) for w in text_clean.split() if len(w) > 2]
+    if not words:
+        return False
 
-    # Row Operations / Outlier / Duplicate Handling
-    if any(k in trans_str for k in ['drop duplicate', 'remove duplicate', 'deduplicate']):
-        df = df.drop_duplicates(subset=[col])
-        return df, f"Removed duplicate rows based on column '{col}'"
-    elif any(k in trans_str for k in ['drop na rows', 'remove missing rows', 'drop null rows', 'drop empty rows']):
-        df = df.dropna(subset=[col])
-        return df, f"Dropped rows with missing values in column '{col}'"
-    elif any(k in trans_str for k in ['outlier', 'clip', 'trim outliers']):
-        if pd.api.types.is_numeric_dtype(df[col]):
-            q1, q3 = df[col].quantile(0.01), df[col].quantile(0.99)
-            df[col] = df[col].clip(lower=q1, upper=q3)
-            return df, f"Clipped 1st-99th percentile outliers in '{col}'"
+    # Single word fuzzy match (ratio >= 0.78)
+    for w in words:
+        if difflib.SequenceMatcher(None, col_clean, w).ratio() >= 0.78:
+            return True
 
-    # 1. Date & Time Transformations
-    if any(k in trans_str for k in ['date', 'datetime', 'time', 'timestamp']):
-        if 'year' in trans_str:
-            df[f"{col}_year"] = pd.to_datetime(df[col], errors='coerce').dt.year
-            return df, f"Extracted year from '{col}' into '{col}_year'"
-        elif 'month' in trans_str:
-            df[f"{col}_month"] = pd.to_datetime(df[col], errors='coerce').dt.month
-            return df, f"Extracted month from '{col}' into '{col}_month'"
+    # N-gram fuzzy match (ratio >= 0.70)
+    ngrams = []
+    for i in range(len(words) - 1):
+        ngrams.append(words[i] + words[i+1])
+    for i in range(len(words) - 2):
+        ngrams.append(words[i] + words[i+1] + words[i+2])
+
+    for ng in ngrams:
+        if difflib.SequenceMatcher(None, col_clean, ng).ratio() >= 0.70:
+            return True
+
+    return False
+
+def polish_and_standardize_prompt(raw_prompt: str, df_columns=None) -> str:
+    """
+    AI Prompt Polish & Intent Standardizer Module.
+    Polishes raw, typo-ridden, or informal user prompts into clean, 
+    canonical instructions before execution.
+    """
+    if not raw_prompt or not isinstance(raw_prompt, str):
+        return ""
+
+    polished = raw_prompt.strip()
+
+    # 1. Common Typo & Slang Corrections
+    typo_map = {
+        r'\btranform\b': 'transform',
+        r'\bperfrom\b': 'perform',
+        r'\btranformation\b': 'transformation',
+        r'\bcolum\b': 'column',
+        r'\bcolums\b': 'columns',
+        r'\breove\b': 'remove',
+        r'\bdelte\b': 'delete',
+        r'\bupcase\b': 'uppercase',
+        r'\blowcase\b': 'lowercase',
+        r'\bnul\b': 'null',
+        r'\bdups\b': 'duplicates',
+        r'\bduplicats\b': 'duplicates'
+    }
+    for typo_pattern, correction in typo_map.items():
+        polished = re.sub(typo_pattern, correction, polished, flags=re.IGNORECASE)
+
+    # 2. Standardize Arrow Shorthand Notation (only for pure shorthand pairs like "0 -> No", not full natural prompts)
+    if not re.search(r'\b(?:transform|replace|change|convert)\b', polished, re.IGNORECASE):
+        polished = re.sub(
+            r"(?<!\bcolumn\s)(?<!\bcol\s)['\"]?(\b[a-zA-Z0-9_.\-\$]+\b)['\"]?\s*(?:->|=>|=)\s*['\"]?(\b[a-zA-Z0-9_.\-\$]+\b)['\"]?",
+            r"where \1 replace \2",
+            polished,
+            flags=re.IGNORECASE
+        )
+
+    # 3. Match column names case-insensitively if DataFrame columns provided
+    if df_columns is not None:
+        for c in df_columns:
+            if match_column_name(c, polished):
+                # Replace fuzzy matches with exact column name if needed
+                pass
+
+    return polished
+
+def apply_column_transformation(df, col, trans, dry_run=False):
+    """
+    Executes advanced, versatile column transformations specified by AI or user prompts
+    using the safe, structured services.cleaning engine.
+    """
+    raw_trans = str(trans or "").strip()
+    if not raw_trans:
+        return df, f"No transformation specified for '{col}'"
+
+    # Match column if passed
+    if col and col not in df.columns:
+        matched = [c for c in df.columns if c.lower() == str(col).lower()]
+        if matched:
+            col = matched[0]
         else:
-            import datetime
-            def _parse_val(v):
-                if pd.isna(v) or v is None: return ""
-                v_str = str(v).strip()
-                for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
-                    try:
-                        dt = datetime.datetime.strptime(v_str, fmt)
-                        return dt.strftime("%Y-%m-%d %H:%M:%S")
-                    except Exception: pass
-                return v_str
-            df[col] = df[col].apply(_parse_val)
-            return df, f"Standardized datetime in '{col}'"
+            return df, f"Column '{col}' not found in dataset"
 
-    # 2. String & Text Case Transformations
-    elif any(k in trans_str for k in ['upper', 'uppercase']):
-        df[col] = df[col].astype(str).str.upper()
-        return df, f"Converted '{col}' to uppercase"
-    elif any(k in trans_str for k in ['lower', 'lowercase']):
-        df[col] = df[col].astype(str).str.lower()
-        return df, f"Converted '{col}' to lowercase"
-    elif any(k in trans_str for k in ['title', 'titlecase', 'capitalize']):
-        df[col] = df[col].astype(str).str.title()
-        return df, f"Capitalized '{col}'"
-    elif any(k in trans_str for k in ['strip', 'trim', 'whitespace']):
-        df[col] = df[col].astype(str).str.strip()
-        return df, f"Cleaned whitespace in '{col}'"
+    plan = build_cleaning_plan(col, raw_trans, df)
+    val_results = validate_plan(plan, df)
 
-    # 3. Currency / Symbol Cleaning
-    elif any(k in trans_str for k in ['currency', 'symbol', 'price', '$', 'dollar', 'strip symbols']):
-        df[col] = df[col].astype(str).str.replace(r'[\$,€,£,,\s]', '', regex=True)
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-        return df, f"Cleaned currency symbols and converted '{col}' to numeric"
+    errors = [r["message"] for r in val_results if r["status"] == "error"]
+    if errors:
+        return df, f"Validation failed for '{col}': " + " | ".join(errors)
 
-    # 4. Encoding
-    elif any(k in trans_str for k in ['encode', 'label encode', 'category', 'factorize']):
-        df[col] = df[col].astype('category').cat.codes
-        return df, f"Label-encoded categorical column '{col}'"
+    if dry_run:
+        return df, plan
 
-    # 5. Imputation Strategies
-    elif 'mean' in trans_str:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-        df[col] = df[col].fillna(df[col].mean())
-        return df, f"Imputed missing in '{col}' with column mean"
-    elif 'median' in trans_str:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-        df[col] = df[col].fillna(df[col].median())
-        return df, f"Imputed missing in '{col}' with column median"
-    elif 'mode' in trans_str:
-        mode_val = df[col].mode()[0] if not df[col].mode().empty else "Unknown"
-        df[col] = df[col].fillna(mode_val)
-        return df, f"Imputed missing in '{col}' with mode"
-    elif any(k in trans_str for k in ['zero', 'fill 0', '0']):
-        df[col] = df[col].fillna(0)
-        return df, f"Filled missing in '{col}' with 0"
+    res = execute_plan(plan, df)
+    cleaned_df = res["df"]
+    msgs = [item["message"] for item in res["audit_log"] if item.get("message")]
+    if res.get("warnings"):
+        msgs.extend(res["warnings"])
+    if res.get("errors"):
+        msgs.extend(res["errors"])
 
-    # 6. Scaling, Normalization & Math
-    elif any(k in trans_str for k in ['normalize', 'min-max', 'minmax', 'scale']):
-        numeric_series = pd.to_numeric(df[col], errors='coerce')
-        min_v, max_v = numeric_series.min(), numeric_series.max()
-        if max_v != min_v:
-            df[col] = (numeric_series - min_v) / (max_v - min_v)
-        return df, f"Applied Min-Max scaling to '{col}'"
-    elif any(k in trans_str for k in ['standardize', 'z-score', 'zscore']):
-        numeric_series = pd.to_numeric(df[col], errors='coerce')
-        std_v = numeric_series.std()
-        if std_v != 0:
-            df[col] = (numeric_series - numeric_series.mean()) / std_v
-        return df, f"Standardized '{col}' with Z-score"
-    elif 'log' in trans_str:
-        import numpy as np
-        df[col] = np.log1p(pd.to_numeric(df[col], errors='coerce').clip(lower=0))
-        return df, f"Applied Log(1+x) transformation to '{col}'"
-    elif any(k in trans_str for k in ['round', 'integer', 'int']):
-        df[col] = pd.to_numeric(df[col], errors='coerce').round()
-        return df, f"Rounded '{col}' to integers"
+    final_msg = " | ".join(msgs) if msgs else f"No operations executed for '{col}'"
+    return cleaned_df, final_msg
 
-    # Default / Fallback numeric or string imputation
-    elif pd.api.types.is_numeric_dtype(df[col]):
-        df[col] = df[col].fillna(df[col].median())
-        return df, f"Imputed missing in '{col}' with median"
-    else:
-        df[col] = df[col].fillna("Unknown")
-        return df, f"Imputed missing in '{col}' with 'Unknown'"
 
 
 def run_background_process(app, session_id, api_key=None):
@@ -267,6 +284,9 @@ def run_background_process(app, session_id, api_key=None):
             initial_shape = df.shape
             df.columns = df.columns.str.strip()
 
+            initial_nulls = df.isnull().sum().to_dict()
+            initial_duplicates = int(df.duplicated().sum())
+
             columns_to_drop = []
             transform_actions = []
 
@@ -283,22 +303,17 @@ def run_background_process(app, session_id, api_key=None):
                         transform_actions.append(msg)
                     except Exception as tex:
                         logging.warning(f"BG transform error {col}: {tex}")
-                else:
-                    try:
-                        if pd.api.types.is_numeric_dtype(df[col]):
-                            if df[col].isnull().any():
-                                df[col] = df[col].fillna(df[col].median())
-                        else:
-                            if df[col].isnull().any():
-                                df[col] = df[col].fillna("Unknown")
-                    except Exception:
-                        pass
+                elif action == 'keep':
+                    # Explicitly preserve column without modification
+                    pass
 
             _update_job_progress(session_id, 55, "Running Pandas type transformations & data cleaning...")
             if columns_to_drop:
                 df = df.drop(columns=columns_to_drop)
 
             final_shape = df.shape
+            final_nulls = df.isnull().sum().to_dict()
+            final_duplicates = int(df.duplicated().sum())
 
             # Save cleaned Excel
             output_filename = f"cleaned_{file_id.split('.')[0]}.xlsx"
@@ -310,8 +325,13 @@ def run_background_process(app, session_id, api_key=None):
                 "initial_rows": initial_shape[0], "initial_cols": initial_shape[1],
                 "final_rows": final_shape[0], "final_cols": final_shape[1],
                 "dropped_columns": columns_to_drop,
-                "transformations_applied": transform_actions
+                "transformations_applied": transform_actions,
+                "null_before": sum(initial_nulls.values()),
+                "null_after": sum(final_nulls.values()),
+                "duplicate_before": initial_duplicates,
+                "duplicate_after": final_duplicates
             }
+
 
             # Skip chart generation during background clean processing.
             charts = []

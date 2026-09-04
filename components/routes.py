@@ -1,4 +1,3 @@
-from pyexpat import model
 import os
 import uuid
 import json
@@ -9,30 +8,30 @@ import re
 from flask import Blueprint, request, jsonify, send_from_directory, current_app, Response, stream_with_context
 from werkzeug.utils import secure_filename
 import pandas as pd
-import numpy as np
 
 def get_safe_preview(df, n=10):
     """Safely converts DataFrame head to dict records for JSON serialization."""
     if df is None or df.empty:
         return []
     df_slice = df.head(n).copy().astype(object)
-    df_slice = df_slice.where(pd.notnull(df_slice), "")
+    df_slice = df_slice.where(df_slice.notna(), "")
     return df_slice.to_dict(orient='records')
 
 
 # Services
-from services.ai_service import get_openai_client, get_llm_client
+from services.ai_service import get_llm_client
 from services.data_service import (
     summarize_schema,
     generate_mock_recommendations,
-    generate_mock_charts,
-    run_background_process
+    run_background_process,
+    apply_column_transformation,
+    polish_and_standardize_prompt,
+    match_column_name
 )
 
 # Utils
 from utils.helpers import allowed_file, parse_json_response
-from utils.session_manager import load_session, save_session
-from utils.fonts import download_lora_fonts
+from utils.session_manager import load_session, save_session, invalidate_session_cache
 from utils.job_tracker import _set_job_state, _get_job_state, _update_job_progress
 
 # Matplotlib & PDF generation imports
@@ -46,7 +45,6 @@ try:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
     from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
     reportlab_installed = True
 except ImportError:
     reportlab_installed = False
@@ -57,6 +55,10 @@ api_blueprint = Blueprint('api', __name__)
 @api_blueprint.route('/')
 def index():
     return send_from_directory('static', 'index.html')
+
+@api_blueprint.route('/favicon.ico')
+def favicon():
+    return '', 204
 
 # Session REST Management Endpoints
 @api_blueprint.route('/api/sessions', methods=['GET'])
@@ -110,6 +112,7 @@ def delete_session(session_id):
     path = os.path.join(session_folder, f"{session_id}.json")
     if os.path.exists(path):
         os.remove(path)
+    invalidate_session_cache(session_id)
     return jsonify({"success": True})
 
 # Refactored Core routes
@@ -224,12 +227,11 @@ def analyze_schema():
     _set_job_state(session_id, "analyzing", progress=5, progress_msg="Queued for analysis")
 
     provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
-    model = data.get("model") or os.environ.get("LLM_MODEL") or "llama-3.3-70b-versatile"
+    model = data.get("model") or os.environ.get("LLM_MODEL") or "nvidia/llama-3.1-nemotron-70b-instruct"
     base_url = data.get("base_url")
     is_mock = (api_key == "MOCK")
     
     # Start background task
-    import threading
     thread = threading.Thread(
         target=background_analyze,
         args=(session_id, goal, api_key, sheet_name, provider, model, base_url, is_mock, current_app._get_current_object())
@@ -310,9 +312,12 @@ Here is the dataset schema summary:
 
 Analyze each column and recommend whether to KEEP, DROP, or TRANSFORM it.
 CRITICAL RULES FOR RECOMMENDATIONS:
-1. Respect the user's explicit Goal "{goal}". If the user specifically asked to drop/remove or keep certain columns in their Goal prompt, honor those instructions exactly.
-2. Be conservative. Default to keeping columns ("action": "keep") unless a column is 100% empty, a 100% duplicate copy, or explicitly requested to be dropped in the user's Goal.
-3. Provide a clear, concise, educational reason for each recommendation.
+1. Default EVERY column to "action": "keep" unless the user's Goal explicitly named that specific column to be dropped (e.g. "drop Customer_ID").
+2. DO NOT set "action": "drop" on any column unless the user specifically named that column to be dropped.
+3. Phrases like "remove duplicates", "remove nulls", "remove rows", or "clean dataset" refer to row/cell operations — DO NOT set "action": "drop" on any column for these general phrases!
+4. If the user's Goal mentions value replacements or transformations for a column (e.g. "CardiovascularDisease tranform 0-> no and 1->yes"), set "action": "transform" and put the transformation instruction in "transformation".
+5. Provide a clear, concise, educational reason for each recommendation.
+
 
 Return valid JSON only in this exact structure:
 {{
@@ -366,7 +371,17 @@ Return valid JSON only in this exact structure:
                 col_actions = {r["column"]: {"action": r["action"], "reason": r["reason"], "transformation": r["transformation"]} for r in recommendations}
                 session_data["column_actions"] = col_actions
 
-                fallback_msg = f"Goal set: **{goal}**.<br>⚠️ API unavailable. Using offline recommendations fallback."
+                err_str = str(api_err)
+                if "401" in err_str or "Authentication" in err_str:
+                    reason_txt = "Invalid/Expired API Key (401)"
+                elif "404" in err_str or "410" in err_str or "Not Found" in err_str or "Gone" in err_str:
+                    reason_txt = "Model Endpoint Deprecated or Account Out of Credits (404/410)"
+                elif "Timeout" in err_str:
+                    reason_txt = "API Response Timeout"
+                else:
+                    reason_txt = err_str[:80]
+
+                fallback_msg = f"Goal set: **{goal}**.<br>⚠️ API notice ({reason_txt}). Using offline recommendations fallback."
                 session_data["chat_history"].append({"role": "user", "content": f"My data cleaning goal is: {goal}"})
                 session_data["chat_history"].append({"role": "assistant", "content": fallback_msg})
                 session_data["recommendations"] = recommendations
@@ -416,6 +431,9 @@ def process_dataset():
         initial_shape = df.shape
         df.columns = df.columns.str.strip()
 
+        initial_nulls = df.isnull().sum().to_dict()
+        initial_duplicates = int(df.duplicated().sum())
+
         columns_to_drop = []
         columns_to_keep = []
         transform_actions = []
@@ -427,54 +445,33 @@ def process_dataset():
             trans = col_data.get('transformation')
 
             if col not in df.columns:
-                continue
+                # Check for case-insensitive match
+                matched = [c for c in df.columns if c.lower() == str(col).lower()]
+                if matched:
+                    col = matched[0]
+                else:
+                    continue
 
             if action == 'drop':
                 columns_to_drop.append(col)
             elif action == 'transform':
                 columns_to_keep.append(col)
                 try:
-                    if trans and ('date' in trans.lower() or 'time' in trans.lower()):
-                        def _parse_val(v):
-                            if pd.isna(v) or v is None: return ""
-                            v_str = str(v).strip()
-                            for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
-                                try:
-                                    dt = datetime.datetime.strptime(v_str, fmt)
-                                    return dt.strftime("%Y-%m-%d %H:%M:%S")
-                                except Exception: pass
-                            return v_str
-                        df[col] = df[col].apply(_parse_val)
-                    elif trans and ('numeric' in trans.lower() or 'number' in trans.lower() or 'float' in trans.lower() or 'int' in trans.lower()):
-                        df[col] = pd.to_numeric(df[col], errors='coerce')
-                        if 'impute' in trans.lower() or 'fill' in trans.lower() or 'missing' in trans.lower():
-                            df[col] = df[col].fillna(df[col].median())
-                    elif pd.api.types.is_numeric_dtype(df[col]):
-                        if df[col].isnull().any():
-                            df[col] = df[col].fillna(df[col].median())
-                    else:
-                        if df[col].isnull().any():
-                            df[col] = df[col].fillna("Unknown")
-                    transform_actions.append(f"Transformed '{col}': {trans or 'imputed missing values'}")
+                    df, msg = apply_column_transformation(df, col, trans)
+                    transform_actions.append(msg)
                 except Exception as ex:
                     logging.warning(f"Failed to transform column {col}: {str(ex)}")
                     transform_actions.append(f"Failed to transform '{col}': {str(ex)}")
             else:
                 columns_to_keep.append(col)
-                try:
-                    if pd.api.types.is_numeric_dtype(df[col]):
-                        if df[col].isnull().any():
-                            df[col] = df[col].fillna(df[col].median())
-                    else:
-                        if df[col].isnull().any():
-                            df[col] = df[col].fillna("Unknown")
-                except Exception:
-                    pass
+                # Explicit keep: do not modify column data or silently impute
 
         if columns_to_drop:
             df = df.drop(columns=columns_to_drop)
 
         final_shape = df.shape
+        final_nulls = df.isnull().sum().to_dict()
+        final_duplicates = int(df.duplicated().sum())
 
         # Save to output Excel
         output_filename = f"cleaned_{file_id.split('.')[0]}.xlsx"
@@ -490,70 +487,17 @@ def process_dataset():
             "final_rows": final_shape[0],
             "final_cols": final_shape[1],
             "dropped_columns": columns_to_drop,
-            "transformations_applied": transform_actions
+            "transformations_applied": transform_actions,
+            "null_before": sum(initial_nulls.values()),
+            "null_after": sum(final_nulls.values()),
+            "duplicate_before": initial_duplicates,
+            "duplicate_after": final_duplicates
         }
 
-        # Do not generate visualizations during clean processing. Visualizations will be requested separately.
+
+        # Visualizations are rendered on demand via the custom_chart route
         session_data["charts"] = []
         rendered_charts = []
-        charts = []  # Explicitly defined to prevent NameError in refactored code
-        for chart in charts:
-            chart_type = chart.get("chart_type")
-            title = chart.get("title")
-            x_col = chart.get("x_axis")
-            y_col = chart.get("y_axis")
-            desc = chart.get("description")
-
-            if x_col not in df.columns:
-                continue
-
-            chart_item = {
-                "chart_type": chart_type,
-                "title": title,
-                "description": desc,
-                "x_axis": x_col,
-                "y_axis": y_col,
-                "data": []
-            }
-
-            try:
-                if chart_type == 'histogram':
-                    value_counts = df[x_col].value_counts().head(10)
-                    chart_item["labels"] = [str(x) for x in value_counts.index]
-                    chart_item["values"] = [int(v) for v in value_counts.values]
-                elif chart_type == 'pie':
-                    value_counts = df[x_col].value_counts().head(6)
-                    chart_item["labels"] = [str(x) for x in value_counts.index]
-                    chart_item["values"] = [int(v) for v in value_counts.values]
-                elif chart_type == 'scatter' and y_col in df.columns:
-                    temp_df = df[[x_col, y_col]].dropna().head(100)
-                    chart_item["points"] = [{"x": float(row[x_col]) if pd.api.types.is_numeric_dtype(df[x_col]) else str(row[x_col]),
-                                             "y": float(row[y_col]) if pd.api.types.is_numeric_dtype(df[y_col]) else str(row[y_col])}
-                                            for _, row in temp_df.iterrows()]
-                elif chart_type == 'line' and y_col in df.columns:
-                    temp_df = df[[x_col, y_col]].dropna().sort_values(by=x_col).head(50)
-                    chart_item["labels"] = [str(x) for x in temp_df[x_col]]
-                    chart_item["values"] = [float(y) if pd.api.types.is_numeric_dtype(df[y_col]) else str(y) for y in temp_df[y_col]]
-                elif chart_type == 'bar':
-                    if y_col in df.columns:
-                        if df[x_col].nunique() < 15:
-                            grouped = df.groupby(x_col)[y_col].mean().head(15)
-                            chart_item["labels"] = [str(x) for x in grouped.index]
-                            chart_item["values"] = [float(v) for v in grouped.values]
-                            chart_item["title"] = f"{title} (Average)"
-                        else:
-                            temp_df = df[[x_col, y_col]].dropna().head(15)
-                            chart_item["labels"] = [str(x) for x in temp_df[x_col]]
-                            chart_item["values"] = [float(y) if pd.api.types.is_numeric_dtype(df[y_col]) else str(y) for y in temp_df[y_col]]
-                    else:
-                        value_counts = df[x_col].value_counts().head(15)
-                        chart_item["labels"] = [str(x) for x in value_counts.index]
-                        chart_item["values"] = [int(v) for v in value_counts.values]
-
-                rendered_charts.append(chart_item)
-            except Exception as chart_data_ex:
-                logging.warning(f"Error computing data for chart {title}: {str(chart_data_ex)}")
-
         preview_data = get_safe_preview(df, 10)
 
         # Append chat confirmation
@@ -607,10 +551,42 @@ def trigger_background_process(session_id):
 
     return jsonify({"status": "processing", "message": "Background processing started."})
 
-# Poll endpoint — frontend polls this every 2s to detect completion
 @api_blueprint.route('/api/sessions/<session_id>/status', methods=['GET'])
 def get_processing_status(session_id):
     job = _get_job_state(session_id)
+    session_data = load_session(session_id)
+
+    if not session_data and job.get("status") in ["idle", None]:
+        return jsonify({"error": "Session not found"}), 404
+
+    # If job memory state is idle/none, fall back to session JSON state
+    if job.get("status") in ["idle", None] and session_data:
+        status = session_data.get("status", "unknown")
+        progress = session_data.get("progress", 0)
+        res = session_data.get("bg_result") or session_data.get("result", {})
+        
+        if status in ["done", "analyze_done"] or session_data.get("cleaned_filename"):
+            if session_data.get("cleaned_filename") and not res.get("download_url"):
+                res["download_url"] = f"/api/download/{session_data['cleaned_filename']}"
+            return jsonify({
+                "status": "done",
+                "result": res,
+                "progress": 100,
+                "progress_msg": "Done!"
+            })
+        elif status == "error":
+            return jsonify({
+                "status": "error",
+                "error": session_data.get("error", "Unknown error"),
+                "progress": progress
+            })
+        elif status:
+            return jsonify({
+                "status": status,
+                "progress": progress,
+                "result": res
+            })
+
     return jsonify(job)
 
 # Conversational Chat Route (non-streaming fallback, kept for compatibility)
@@ -632,8 +608,9 @@ def chat_session(session_id):
 
     provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
     model = data.get("model") or os.environ.get("LLM_MODEL")
+    base_url = data.get("base_url")
     if not model:
-        raise ValueError("No model specified and LLM_MODEL not set in environment")
+        return jsonify({"error": "No model specified and LLM_MODEL not set in environment"}), 400
 
     is_mock = (api_key == "MOCK")
     client = None if is_mock else get_llm_client(api_key=api_key, provider=provider, model=model, base_url=base_url)
@@ -641,15 +618,26 @@ def chat_session(session_id):
     def run_local_fallback(msg_lower, current_session):
         schema_updates = {}
         columns = [col["name"] for col in current_session["columns"]]
+        clean_msg = re.sub(
+            r'\b(remove|drop|delete)\s+(duplicates?|nulls?|nans?|missing|rows?|placeholders?|outliers?|invalid|bad)\b',
+            '',
+            msg_lower,
+            flags=re.IGNORECASE
+        )
         for col in columns:
-            if col.lower() in msg_lower:
-                if any(kw in msg_lower for kw in ["drop", "remove", "delete", "eliminate"]):
+            col_lower = col.lower()
+            col_spaced = col_lower.replace('_', ' ')
+            col_pattern = rf"\b(?:{re.escape(col_lower)}|{re.escape(col_spaced)})\b"
+            if re.search(col_pattern, clean_msg):
+                drop_pattern = rf"\b(?:drop|remove|delete|eliminate)\b.*\b(?:{re.escape(col_lower)}|{re.escape(col_spaced)})\b|\b(?:{re.escape(col_lower)}|{re.escape(col_spaced)})\b.*\b(?:drop|remove|delete|eliminate)\b"
+                if re.search(drop_pattern, clean_msg):
                     schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in chat.", "transformation": None}
                 elif any(kw in msg_lower for kw in ["keep", "add", "retain", "include"]):
                     schema_updates[col] = {"action": "keep", "reason": "Kept by user request in chat.", "transformation": None}
                 elif any(kw in msg_lower for kw in ["transform", "convert", "encode", "impute"]):
                     schema_updates[col] = {"action": "transform", "reason": "Transform requested in chat.", "transformation": "Custom transform"}
         return schema_updates
+
 
     if is_mock or not client:
         msg_lower = message.lower()
@@ -801,14 +789,25 @@ def chat_session_stream(session_id):
         msg_lower = message.lower()
         schema_updates = {}
         columns = [col["name"] for col in session_data["columns"]]
+        clean_msg = re.sub(
+            r'\b(remove|drop|delete)\s+(duplicates?|nulls?|nans?|missing|rows?|placeholders?|outliers?|invalid|bad)\b',
+            '',
+            msg_lower,
+            flags=re.IGNORECASE
+        )
         for col in columns:
-            if col.lower() in msg_lower:
-                if any(kw in msg_lower for kw in ["drop", "remove", "delete", "eliminate"]):
+            col_lower = col.lower()
+            col_spaced = col_lower.replace('_', ' ')
+            col_pattern = rf"\b(?:{re.escape(col_lower)}|{re.escape(col_spaced)})\b"
+            if re.search(col_pattern, clean_msg):
+                drop_pattern = rf"\b(?:drop|remove|delete|eliminate)\b.*\b(?:{re.escape(col_lower)}|{re.escape(col_spaced)})\b|\b(?:{re.escape(col_lower)}|{re.escape(col_spaced)})\b.*\b(?:drop|remove|delete|eliminate)\b"
+                if re.search(drop_pattern, clean_msg):
                     schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in chat.", "transformation": None}
                 elif any(kw in msg_lower for kw in ["keep", "add", "retain", "include"]):
                     schema_updates[col] = {"action": "keep", "reason": "Kept by user request in chat.", "transformation": None}
                 elif any(kw in msg_lower for kw in ["transform", "convert", "encode", "impute"]):
                     schema_updates[col] = {"action": "transform", "reason": "Transform requested in chat.", "transformation": "Custom transform"}
+
 
         if schema_updates:
             response_msg = f"Done! I've updated the action for **{', '.join(schema_updates.keys())}**. The schema grid has been refreshed."
@@ -863,15 +862,18 @@ Current columns and chosen actions:
 {json.dumps(schema_context, indent=2)}
 
 CRITICAL INSTRUCTIONS:
-1. If the user asks for schema updates, column actions, or cell value changes (e.g. "replace 'Tesla' with 'Tesla Motors'", "drop date column"), you MUST include the <<<SCHEMA_UPDATES>>> JSON block at the end of your response.
-2. Format:
+1. DO NOT set "action": "drop" on any column unless the user explicitly named that exact column by name to be dropped (e.g. "drop Year").
+2. General phrases like "remove duplicates", "remove nulls", "remove rows" refer to dataset row operations — DO NOT set "action": "drop" on any column for these phrases.
+3. If the user asks for schema updates, column actions, or cell value changes (e.g. "replace 'Tesla' with 'Tesla Motors'", "drop date column"), you MUST include the <<<SCHEMA_UPDATES>>> JSON block at the end of your response.
+4. Format:
 I have updated the dataset actions for your request.
 <<<SCHEMA_UPDATES>>>
 {{"column_name": {{"action": "drop|keep|transform", "reason": "...", "transformation": "replace 'OLD' with 'NEW' or 'uppercase' or 'label encode' or null"}}}}
 <<<END>>>
 
-3. ONLY include entries in <<<SCHEMA_UPDATES>>> for columns explicitly requested or modified by the user. Do NOT include unchanged columns.
-4. Do NOT output internal monologue or thinking steps to the user. Respond concisely and cleanly."""
+5. ONLY include entries in <<<SCHEMA_UPDATES>>> for columns explicitly requested or modified by the user. Do NOT include unchanged columns.
+6. Do NOT output internal monologue or thinking steps to the user. Respond concisely and cleanly.
+"""
 
         # Build proper multi-turn messages
         messages_for_model = [{"role": "system", "content": system_prompt}]
@@ -947,20 +949,17 @@ I have updated the dataset actions for your request.
                 except Exception as parse_err:
                     logging.warning(f"Failed to parse schema_updates JSON block: {parse_err}")
                 full_response = visible_text
-            # Safety net: If schema_updates is empty or missed any mentioned columns, extract directly from user message
+            
+            # Safety net: Extract actions & fuzzy match columns directly from user message
             msg_lower = message.lower()
             is_drop = any(kw in msg_lower for kw in ["drop", "remove", "delete", "eliminate"])
             is_keep = any(kw in msg_lower for kw in ["keep", "retain", "include"])
-            is_trans = any(kw in msg_lower for kw in ["transform", "convert", "encode", "replace", "change", "impute"])
-            
-            clean_msg = re.sub(r'[^a-z0-9_\s]', ' ', msg_lower)
-            words = set(clean_msg.split())
+            is_trans = any(kw in msg_lower for kw in ["transform", "tranform", "convert", "encode", "replace", "change", "impute", "->", "=>", "to"])
+            is_execute_cmd = any(kw in msg_lower for kw in ["perform", "perfrom", "execute", "run", "do task", "apply", "do it", "clean dataset", "process data"])
 
             for col in session_data["column_actions"].keys():
-                col_lower = col.lower()
-                col_clean = col_lower.replace('_', ' ')
-                # Check if column is mentioned in prompt (e.g. "year", "month_name", "month name", "state")
-                if col_lower in msg_lower or col_lower in words or col_clean in msg_lower:
+                # Fuzzy column match (handles UK/US spelling, singular/plural, spaces)
+                if match_column_name(col, message):
                     if is_drop and session_data["column_actions"][col].get("action") != "drop":
                         upd = {"action": "drop", "reason": f"Dropped column '{col}' per user chat request.", "transformation": None}
                         schema_updates[col] = upd
@@ -969,8 +968,9 @@ I have updated the dataset actions for your request.
                         upd = {"action": "keep", "reason": f"Retained column '{col}' per user chat request.", "transformation": None}
                         schema_updates[col] = upd
                         session_data["column_actions"][col] = upd
-                    elif is_trans:
-                        upd = {"action": "transform", "reason": f"Transformed column '{col}' per user chat request.", "transformation": message}
+                    elif is_trans or not is_drop:
+                        polished_trans = polish_and_standardize_prompt(message, list(session_data["column_actions"].keys()))
+                        upd = {"action": "transform", "reason": f"Transformed column '{col}' per user chat request.", "transformation": polished_trans}
                         schema_updates[col] = upd
                         session_data["column_actions"][col] = upd
 
@@ -979,14 +979,11 @@ I have updated the dataset actions for your request.
             msg_lower = message.lower()
             is_drop = any(kw in msg_lower for kw in ["drop", "remove", "delete", "eliminate"])
             is_keep = any(kw in msg_lower for kw in ["keep", "retain", "include"])
-            is_trans = any(kw in msg_lower for kw in ["transform", "convert", "encode", "replace", "change", "impute"])
-            clean_msg = re.sub(r'[^a-z0-9_\s]', ' ', msg_lower)
-            words = set(clean_msg.split())
+            is_trans = any(kw in msg_lower for kw in ["transform", "tranform", "convert", "encode", "replace", "change", "impute", "->", "=>", "to"])
+            is_execute_cmd = any(kw in msg_lower for kw in ["perform", "perfrom", "execute", "run", "do task", "apply", "do it", "clean dataset", "process data"])
 
             for col in session_data["column_actions"].keys():
-                col_lower = col.lower()
-                col_clean = col_lower.replace('_', ' ')
-                if col_lower in msg_lower or col_lower in words or col_clean in msg_lower:
+                if match_column_name(col, message):
                     if is_drop:
                         upd = {"action": "drop", "reason": f"Dropped column '{col}' per user chat request.", "transformation": None}
                         schema_updates[col] = upd
@@ -995,8 +992,9 @@ I have updated the dataset actions for your request.
                         upd = {"action": "keep", "reason": f"Retained column '{col}' per user chat request.", "transformation": None}
                         schema_updates[col] = upd
                         session_data["column_actions"][col] = upd
-                    elif is_trans:
-                        upd = {"action": "transform", "reason": f"Transformed column '{col}' per user chat request.", "transformation": message}
+                    elif is_trans or not is_drop:
+                        polished_trans = polish_and_standardize_prompt(message, list(session_data["column_actions"].keys()))
+                        upd = {"action": "transform", "reason": f"Transformed column '{col}' per user chat request.", "transformation": polished_trans}
                         schema_updates[col] = upd
                         session_data["column_actions"][col] = upd
 
@@ -1004,14 +1002,14 @@ I have updated the dataset actions for your request.
                 full_response = f"I have processed your request for the dataset: {message}."
 
         # Emit schema updates event (frontend UI badges and tables listen to this)
-        trigger = len(schema_updates) > 0
+        trigger = (len(schema_updates) > 0) or is_execute_cmd
         yield f"event: schema_updates\ndata: {json.dumps({'schema_updates': schema_updates, 'column_actions': session_data['column_actions'], 'trigger_reprocess': trigger})}\n\n"
 
         # Save to session DB
         session_data["chat_history"].append({"role": "assistant", "content": full_response})
         save_session(session_data)
 
-        # Auto-trigger background dataset re-process if schema changed
+        # Auto-trigger background dataset re-process if schema changed or execution requested
         if trigger:
             t = threading.Thread(
                 target=run_background_process,
@@ -1055,51 +1053,55 @@ def create_pdf_report(session_id):
     try:
         df = pd.read_excel(cleaned_path)
 
-        # 1. Render Matplotlib charts to file
+        # 1. Render Matplotlib charts to file with thread lock safety
+        from powerbi_visuals.trend_charts import PLOT_LOCK
+
         chart_images = []
-        for idx, chart in enumerate(session_data.get("charts", [])):
-            chart_type = chart.get("chart_type")
-            title = chart.get("title")
-            x = chart.get("x_axis")
-            y = chart.get("y_axis")
+        target_charts = session_data.get("pinned_charts") if session_data.get("pinned_charts") else session_data.get("charts", [])
+        for idx, chart in enumerate(target_charts):
+            chart_type = chart.get("chart_type") or chart.get("type", "bar")
+            title = chart.get("title") or f"{chart.get('y_axis', '')} by {chart.get('x_axis', '')}"
+            x = chart.get("x_axis") or chart.get("x_col")
+            y = chart.get("y_axis") or chart.get("y_col")
 
             if x not in df.columns:
                 continue
 
-            plt.figure(figsize=(6, 3.5))
+            with PLOT_LOCK:
+                try:
+                    plt.figure(figsize=(6, 3.5))
 
-            # Setup Lora Font if registered, else DejaVu Sans
-            active_font = 'Lora' if 'Lora' in pdfmetrics.getRegisteredFontNames() else 'DejaVu Sans'
-            plt.title(title, fontname=active_font, fontsize=12, fontweight='bold', pad=10)
+                    # Setup Lora Font if registered, else DejaVu Sans
+                    active_font = 'Lora' if 'Lora' in pdfmetrics.getRegisteredFontNames() else 'DejaVu Sans'
+                    plt.title(title, fontname=active_font, fontsize=12, fontweight='bold', pad=10)
 
-            try:
-                if chart_type == 'histogram':
-                    df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
-                    plt.ylabel('Frequency')
-                elif chart_type == 'pie':
-                    df[x].dropna().value_counts().head(6).plot(kind='pie', autopct='%1.1f%%', colors=['#6366f1', '#a855f7', '#10b981', '#f59e0b', '#3b82f6'])
-                    plt.ylabel('')
-                elif chart_type == 'scatter' and y in df.columns:
-                    df.dropna(subset=[x, y]).plot(kind='scatter', x=x, y=y, color='#a855f7')
-                elif chart_type == 'line' and y in df.columns:
-                    df.dropna(subset=[x, y]).sort_values(by=x).plot(kind='line', x=x, y=y, color='#6366f1')
-                elif chart_type == 'bar' and y in df.columns:
-                    df.groupby(x)[y].mean().head(12).plot(kind='bar', color='#10b981')
-                    plt.ylabel(f'Avg {y}')
-                else:
-                    df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
+                    if chart_type == 'histogram':
+                        df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
+                        plt.ylabel('Frequency')
+                    elif chart_type == 'pie':
+                        df[x].dropna().value_counts().head(6).plot(kind='pie', autopct='%1.1f%%', colors=['#6366f1', '#a855f7', '#10b981', '#f59e0b', '#3b82f6'])
+                        plt.ylabel('')
+                    elif chart_type == 'scatter' and y in df.columns:
+                        df.dropna(subset=[x, y]).plot(kind='scatter', x=x, y=y, color='#a855f7')
+                    elif chart_type == 'line' and y in df.columns:
+                        df.dropna(subset=[x, y]).sort_values(by=x).plot(kind='line', x=x, y=y, color='#6366f1')
+                    elif chart_type == 'bar' and y in df.columns:
+                        df.groupby(x)[y].mean().head(12).plot(kind='bar', color='#10b981')
+                        plt.ylabel(f'Avg {y}')
+                    else:
+                        df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
 
-                plt.xticks(rotation=45, ha='right', fontsize=8)
-                plt.tight_layout()
+                    plt.xticks(rotation=45, ha='right', fontsize=8)
+                    plt.tight_layout()
 
-                img_filename = f"{session_id}_chart_{idx}.png"
-                img_path = os.path.join(current_app.config['OUTPUT_FOLDER'], img_filename)
-                plt.savefig(img_path, dpi=200)
-                plt.close()
-                chart_images.append((img_path, chart.get("description", "")))
-            except Exception as plot_ex:
-                logging.warning(f"Failed to generate plot for PDF {title}: {str(plot_ex)}")
-                plt.close()
+                    img_filename = f"{session_id}_chart_{idx}.png"
+                    img_path = os.path.join(current_app.config['OUTPUT_FOLDER'], img_filename)
+                    plt.savefig(img_path, dpi=200, bbox_inches='tight')
+                    chart_images.append((img_path, chart.get("description", "")))
+                except Exception as plot_ex:
+                    logging.warning(f"Failed to generate plot for PDF {title}: {str(plot_ex)}")
+                finally:
+                    plt.close()
 
         # 2. Build PDF Document using ReportLab & Lora Font
         pdf_filename = f"report_{session_id}.pdf"
@@ -1304,11 +1306,63 @@ def download_pdf_report(session_id):
     if not session_data or not session_data.get("pdf_filename"):
         return jsonify({"error": "PDF report not found. Please click generate report first."}), 404
 
-    pdf_path = os.path.join(current_app.config['OUTPUT_FOLDER'], session_data["pdf_filename"])
+    safe_pdf_name = secure_filename(session_data["pdf_filename"])
+    pdf_path = os.path.join(current_app.config['OUTPUT_FOLDER'], safe_pdf_name)
     if not os.path.exists(pdf_path):
         return jsonify({"error": "Report PDF file not found on disk."}), 404
 
-    return send_from_directory(current_app.config['OUTPUT_FOLDER'], session_data["pdf_filename"], as_attachment=True)
+    return send_from_directory(current_app.config['OUTPUT_FOLDER'], safe_pdf_name, as_attachment=True)
+
+
+@api_blueprint.route('/api/sessions/<session_id>/pin_chart', methods=['POST'])
+def toggle_pin_chart(session_id):
+    session_data = load_session(session_id)
+    if not session_data:
+        return jsonify({"error": "Session not found"}), 404
+
+    data = request.json or {}
+    chart_obj = data.get("chart")
+    if not chart_obj:
+        return jsonify({"error": "Missing chart payload"}), 400
+
+    pinned = session_data.get("pinned_charts", [])
+    
+    chart_title = chart_obj.get("title") or f"{chart_obj.get('chart_type')}_{chart_obj.get('x_axis')}_{chart_obj.get('y_axis')}"
+    
+    existing_idx = -1
+    for i, item in enumerate(pinned):
+        item_id = item.get("title") or f"{item.get('chart_type')}_{item.get('x_axis')}_{item.get('y_axis')}"
+        if item_id == chart_title:
+            existing_idx = i
+            break
+
+    if existing_idx >= 0:
+        pinned.pop(existing_idx)
+        is_pinned = False
+        message = "Unpinned chart from PDF report"
+    else:
+        pinned.append(chart_obj)
+        is_pinned = True
+        message = "Pinned chart to PDF report!"
+
+    session_data["pinned_charts"] = pinned
+    save_session(session_data)
+    
+    return jsonify({
+        "success": True,
+        "is_pinned": is_pinned,
+        "pinned_count": len(pinned),
+        "message": message
+    })
+
+
+@api_blueprint.route('/api/sessions/<session_id>/pinned_charts', methods=['GET'])
+def get_pinned_charts(session_id):
+    session_data = load_session(session_id)
+    if not session_data:
+        return jsonify({"error": "Session not found"}), 404
+    pinned = session_data.get("pinned_charts", [])
+    return jsonify({"pinned_charts": pinned, "count": len(pinned)})
 
 
 @api_blueprint.route('/api/sessions/<session_id>/update_cell', methods=['POST'])
@@ -1343,12 +1397,30 @@ def update_individual_cell(session_id):
 
         row_i = int(row_idx)
         if col_name in df.columns and 0 <= row_i < len(df):
-            df.at[row_i, col_name] = new_val
-            # Save back to disk
-            if file_ext in ['xlsx', 'xls']:
-                df.to_excel(file_path, index=False)
-            else:
-                df.to_csv(file_path, index=False)
+            # Smart Type Auto-Inference: Cast input to column's underlying data type
+            target_dtype = df[col_name].dtype
+            casted_val = new_val
+            if new_val is not None and str(new_val).strip() != "":
+                try:
+                    if pd.api.types.is_integer_dtype(target_dtype):
+                        casted_val = int(float(new_val))
+                    elif pd.api.types.is_float_dtype(target_dtype):
+                        casted_val = float(new_val)
+                    elif pd.api.types.is_bool_dtype(target_dtype):
+                        casted_val = str(new_val).strip().lower() in ('true', '1', 'yes', 'y')
+                    elif pd.api.types.is_datetime64_any_dtype(target_dtype):
+                        casted_val = pd.to_datetime(new_val)
+                except Exception:
+                    casted_val = new_val
+
+            df.at[row_i, col_name] = casted_val
+
+            # Save non-destructively to session working copy in OUTPUT_FOLDER
+            working_filename = f"edited_{file_id.split('.')[0]}.xlsx"
+            working_path = os.path.join(current_app.config['OUTPUT_FOLDER'], working_filename)
+            df.to_excel(working_path, index=False)
+            session_data["cleaned_filename"] = working_filename
+            save_session(session_data)
 
             # Trigger background process to reprocess dataset preview
             t = threading.Thread(
@@ -1358,7 +1430,7 @@ def update_individual_cell(session_id):
             )
             t.start()
 
-            return jsonify({"success": True, "message": f"Updated cell at row {row_i}, column '{col_name}' to '{new_val}'"})
+            return jsonify({"success": True, "message": f"Updated cell at row {row_i}, column '{col_name}' to '{casted_val}'"})
         else:
             return jsonify({"error": "Invalid row index or column name"}), 400
     except Exception as e:
@@ -1377,7 +1449,7 @@ def generate_viz_chat(session_id):
         return jsonify({"error": "Session not found"}), 404
 
     data = request.json or {}
-    message = data.get("message")
+    message = data.get("message", "")
     api_key = data.get("api_key")
     provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
     model = data.get("model") or os.environ.get("LLM_MODEL") or "llama-3.1-8b-instant"
@@ -1386,12 +1458,49 @@ def generate_viz_chat(session_id):
     if not message:
         return jsonify({"error": "Missing message"}), 400
 
+    col_objs = session_data.get("columns", [])
+    columns = [col["name"] for col in col_objs]
+
+    def build_fallback_params(msg_text):
+        msg_lower = msg_text.lower()
+        cat = "comparison"
+        c_type = "bar"
+
+        if any(kw in msg_lower for kw in ["pie", "donut"]):
+            cat = "part_to_whole"
+            c_type = "pie" if "pie" in msg_lower else "donut"
+        elif any(kw in msg_lower for kw in ["line", "trend", "area"]):
+            cat = "trend"
+            c_type = "line" if "line" in msg_lower else "area"
+        elif any(kw in msg_lower for kw in ["scatter", "relationship", "bubble"]):
+            cat = "relationship"
+            c_type = "scatter"
+        elif any(kw in msg_lower for kw in ["histogram", "distribution", "box"]):
+            cat = "distribution"
+            c_type = "histogram" if "histogram" in msg_lower else "box"
+        elif any(kw in msg_lower for kw in ["waterfall", "funnel"]):
+            cat = "change_flow"
+            c_type = "waterfall" if "waterfall" in msg_lower else "funnel"
+
+        matched_cols = []
+        for col_name in columns:
+            if re.search(rf"\b{re.escape(col_name.lower())}\b", msg_lower):
+                matched_cols.append(col_name)
+
+        x_col = matched_cols[0] if len(matched_cols) > 0 else (columns[0] if columns else "Category")
+        y_col = matched_cols[1] if len(matched_cols) > 1 else (columns[-1] if columns else "Value")
+
+        return {
+            "chart_category": cat,
+            "chart_type": c_type,
+            "x_col": x_col,
+            "y_col": y_col
+        }
+
     client = get_llm_client(api_key=api_key, provider=provider, model=model, base_url=base_url)
     if not client:
-        return jsonify({"error": "Mock LLM is not supported for this."}), 400
+        return jsonify({"success": True, "params": build_fallback_params(message)})
 
-    columns = [col["name"] for col in session_data.get("columns", [])]
-    
     system_prompt = f"""You are an AI data visualization assistant.
 The user wants to generate a chart. You must extract the parameters for the chart based on the user's request.
 The available columns in the dataset are: {', '.join(columns)}
@@ -1423,11 +1532,13 @@ Return ONLY valid JSON. No markdown formatting or extra text."""
             content = content[7:-3]
         elif content.startswith("```"):
             content = content[3:-3]
-        
+
         result = json.loads(content)
         return jsonify({"success": True, "params": result})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logging.warning(f"LLM viz_chat failed ({str(e)}), using rule-based visual fallback.")
+        return jsonify({"success": True, "params": build_fallback_params(message)})
+
 
 @api_blueprint.route('/api/sessions/<session_id>/custom_chart', methods=['POST'])
 def generate_custom_chart(session_id):
@@ -1444,29 +1555,53 @@ def generate_custom_chart(session_id):
     y_col = data.get("y_col")
     y_col_2 = data.get("y_col_2")
     group_col = data.get("group_col")
-    
-    # Basic Validation
-    if chart_type in ['pie', 'donut', 'bar', 'line', 'area', 'scatter', 'clustered_column', 'waterfall']:
-        if not x_col or not y_col:
-            return jsonify({"error": "Missing required columns. Please ensure your prompt specifies both what to measure (Y-axis) and what to group by (X-axis/Category)."}), 400
-    
-    # Filter config (optional slicers)
-    # E.g. {"Region": "North America", "Sales": {">": 100}}
     filters = data.get("filters", {})
+
     
-    # Load dataset
+    # Load dataset (prefer cleaned file, fallback to raw upload file)
     clean_filename = session_data.get("cleaned_filename")
-    if not clean_filename:
-        return jsonify({"error": "Dataset has not been processed yet."}), 400
-    clean_path = os.path.join(current_app.config['OUTPUT_FOLDER'], clean_filename)
+    if clean_filename:
+        file_path = os.path.join(current_app.config['OUTPUT_FOLDER'], clean_filename)
+    else:
+        raw_file_id = session_data.get("file_id")
+        if not raw_file_id:
+            return jsonify({"error": "Dataset file not found."}), 400
+        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], raw_file_id)
+
     try:
-        if clean_path.endswith('.csv'):
-            df = pd.read_csv(clean_path)
+        sheet_name = session_data.get("sheet_name", "Default")
+        if file_path.endswith('.csv'):
+            df = pd.read_csv(file_path)
         else:
-            df = pd.read_excel(clean_path)
+            df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
     except Exception as e:
         return jsonify({"error": f"Failed to load dataset: {str(e)}"}), 500
-        
+
+    # Auto-resolve x_col and y_col if missing or invalid
+    if not x_col or x_col not in df.columns:
+        cat_cols = df.select_dtypes(include=['object', 'category', 'string']).columns.tolist()
+        x_col = cat_cols[0] if cat_cols else df.columns[0]
+    if not y_col or y_col not in df.columns:
+        num_cols = df.select_dtypes(include=['number']).columns.tolist()
+        y_col = num_cols[0] if num_cols else df.columns[-1]
+
+    # Ensure y_col is numeric for plotting (strip symbols, coerce strings, fallback to count metric if purely text)
+    if y_col and y_col in df.columns:
+        if df[y_col].dtype == object or str(df[y_col].dtype) in ['category', 'string']:
+            cleaned_num = df[y_col].astype(str).str.replace(r'[\$,%\s,]', '', regex=True)
+            num_series = pd.to_numeric(cleaned_num, errors='coerce')
+            if num_series.notna().sum() > 0:
+                df[y_col] = num_series.fillna(0)
+            else:
+                df['_freq_metric'] = 1
+                y_col = '_freq_metric'
+        else:
+            df[y_col] = pd.to_numeric(df[y_col], errors='coerce').fillna(0)
+
+    if y_col_2 and y_col_2 in df.columns:
+        cleaned_num2 = df[y_col_2].astype(str).str.replace(r'[\$,%\s,]', '', regex=True)
+        df[y_col_2] = pd.to_numeric(cleaned_num2, errors='coerce').fillna(0)
+
     # Apply filters (slicer simulation)
     for col, f_val in filters.items():
         if col in df.columns:
@@ -1481,10 +1616,32 @@ def generate_custom_chart(session_id):
             else:
                 # Exact match
                 df = df[df[col] == f_val]
-                
+
     if df.empty:
         return jsonify({"error": "Filtered dataset is empty."}), 400
-        
+
+    # DoS Protection & Memory Safety: Pre-aggregate or sample large DataFrames before plotting
+    max_plot_points = 1000
+    if chart_category in ['comparison', 'part_to_whole']:
+        # Aggregate categorical metrics to top 30 categories
+        if x_col in df.columns and y_col in df.columns:
+            try:
+                agg_cols = [y_col]
+                if y_col_2 and y_col_2 in df.columns and y_col_2 != y_col:
+                    agg_cols.append(y_col_2)
+                
+                # Perform grouped mean aggregation if cardinality is high
+                if df[x_col].nunique() > 30 or len(df) > 100:
+                    grouped_df = df.groupby(x_col, as_index=False)[agg_cols].mean().head(30)
+                    if not grouped_df.empty:
+                        df = grouped_df
+            except Exception as agg_ex:
+                logging.warning(f"Chart pre-aggregation fallback: {agg_ex}")
+    elif len(df) > max_plot_points:
+        # Uniform downsampling for continuous line/scatter/distribution charts
+        step = len(df) // max_plot_points
+        df = df.iloc[::step].copy()
+
     try:
         result = None
         
@@ -1563,23 +1720,59 @@ def generate_custom_chart(session_id):
         traceback.print_exc()
         return jsonify({"error": f"Error generating chart: {str(e)}"}), 500
 
-@api_blueprint.route('/api/sessions/<session_id>/status', methods=['GET'])
-def get_session_status(session_id):
+
+
+
+@api_blueprint.route('/api/sessions/<session_id>/dry_run', methods=['POST'])
+def dry_run_session(session_id):
+    """
+    Dry-run endpoint: Builds and validates a cleaning plan without modifying the dataset on disk.
+    """
     session_data = load_session(session_id)
     if not session_data:
         return jsonify({"error": "Session not found"}), 404
-        
-    status = session_data.get("status", "unknown")
-    progress = session_data.get("progress", 0)
-    
-    response = {
-        "status": status,
-        "progress": progress
-    }
-    
-    if status == "error":
-        response["error"] = session_data.get("error")
-    elif status in ["analyze_done", "done"]:
-        response["result"] = session_data.get("result", {})
-        
-    return jsonify(response)
+
+    data = request.json or {}
+    actions = data.get("actions") or session_data.get("column_actions", {})
+    sheet_name = data.get("sheet_name", "Default")
+
+    file_id = session_data["file_id"]
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], file_id)
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Uploaded file not found"}), 404
+
+    try:
+        file_ext = file_id.rsplit('.', 1)[1].lower()
+        if file_ext in ['xlsx', 'xls']:
+            df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
+        else:
+            df = pd.read_csv(file_path)
+
+        from services.cleaning import build_cleaning_plan, validate_plan
+
+        full_plan = []
+        for col, col_data in actions.items():
+            action = col_data.get('action')
+            trans = col_data.get('transformation')
+            if action == 'transform' and trans:
+                col_plan = build_cleaning_plan(col, trans, df)
+                full_plan.extend(col_plan)
+            elif action == 'drop':
+                full_plan.append({
+                    "column": col,
+                    "operation": "drop_column",
+                    "parameters": {},
+                    "order": len(full_plan) + 1,
+                    "raw_step": f"drop {col}",
+                    "message": f"Drop column '{col}'."
+                })
+
+        val_results = validate_plan(full_plan, df)
+        return jsonify({
+            "success": True,
+            "cleaning_plan": full_plan,
+            "validation": val_results
+        })
+    except Exception as e:
+        return jsonify({"error": f"Dry run failed: {str(e)}"}), 500
+

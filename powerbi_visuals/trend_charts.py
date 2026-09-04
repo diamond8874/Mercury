@@ -9,14 +9,20 @@ import numpy as np
 import io
 import base64
 
+import threading
+PLOT_LOCK = threading.RLock()
+
 def _fig_to_base64(fig):
-    """Helper to convert matplotlib figure to base64 image string."""
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', bbox_inches='tight', transparent=True)
-    buf.seek(0)
-    data = base64.b64encode(buf.read()).decode('utf-8')
-    plt.close(fig)
-    return data
+    """Helper to convert matplotlib figure to high-quality base64 image string with thread safety."""
+    with PLOT_LOCK:
+        try:
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', dpi=200, bbox_inches='tight', transparent=True)
+            buf.seek(0)
+            data = base64.b64encode(buf.read()).decode('utf-8')
+            return data
+        finally:
+            plt.close(fig)
 
 def render_line_chart(df: pd.DataFrame, x_col: str, y_col: str):
     fig, ax = plt.subplots(figsize=(8, 4))

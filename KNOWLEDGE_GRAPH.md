@@ -41,16 +41,21 @@ Mercury uses a clean, decoupled **Adapter/Factory Pattern** to resolve, configur
 |-------------|------|-------------|--------------|
 | `app.py` | Flask Entrypoint | Lean main entry point for booting and initializing the Flask application. | `flask`, `config`, `components.routes`, `utils.fonts` |
 | `config.py` | Configuration | Defines folder paths, extension restrictions, and loads environment variables. | `os`, `dotenv` |
-| `components/routes.py` | Blueprint Routes | Refactored routes parsing custom LLM states (provider, model, keys) for schema analysis, streaming chat sessions, `/api/sessions/<id>/update_cell` endpoint, and multi-column safety net parsing. | `flask`, `pandas`, `numpy`, `matplotlib`, `reportlab`, `services`, `utils` |
+| `components/routes.py` | Blueprint Routes | Refactored routes parsing custom LLM states (provider, model, keys) for schema analysis, streaming chat sessions, `/api/sessions/<id>/update_cell`, `/api/sessions/<id>/dry_run`, `/api/sessions/<id>/custom_chart`, `/api/sessions/<id>/pin_chart`, and customized PDF compilation. | `flask`, `pandas`, `numpy`, `matplotlib`, `reportlab`, `services`, `utils` |
 | `services/ai_service.py` | Service | Contains `UnifiedLLMClient` implementing multi-provider LLM routing, auto-resolving, LiteLLM compatibility, and OpenAI base URL routing for Nvidia (`https://integrate.api.nvidia.com/v1`). | `litellm`, `os`, `logging` |
-| `services/data_service.py` | Service | Core data operations, versatile `apply_column_transformation` engine (string cleaning, currency stripping, cell value replacement `replace 'X' with 'Y'`, imputation, scaling, feature extraction), schema summary, mock suggestions, and background worker threads. | `pandas`, `numpy`, `os`, `logging`, `utils` |
+| `services/data_service.py` | Service | Core data operations, `apply_column_transformation` engine delegating to `services.cleaning`, schema summary, mock suggestions, and background worker threads. | `pandas`, `numpy`, `os`, `logging`, `utils`, `services.cleaning` |
+| `services/cleaning/` | Subpackage | Safe, modular AI cleaning engine featuring `operation_registry.py` (central op definitions & dtype targets), `intent_parser.py` (Natural Human Language → structured plan conversion for shorthand & natural phrasings like `0 to No`, `0->No`, `transform column X into Y`, `convert float`, `fill missing 0`), `validator.py` (pre-execution validation), `executor.py` (isolated handlers), `audit.py` (structured audit logs). | `pandas`, `numpy`, `re`, `difflib`, `logging` |
 | `utils/helpers.py` | Utility Helper | Functions for filename validation and JSON response parsing. | `json`, `config` |
-| `utils/session_manager.py` | Session Utility | Atomic session load/save with `.tmp` file replacement and custom JSON encoder to serialize pandas/numpy objects cleanly. | `json`, `os`, `pandas`, `numpy`, `flask`, `config` |
+| `utils/session_manager.py` | Session Manager | Manages JSON session persistence, thread-safe memory caching (`SESSION_CACHE`), path-traversal sanitization (`sanitize_session_id`), and exponential backoff file locking (`SESSION_LOCK`). | `json`, `os`, `threading`, `re` |
+| `powerbi_visuals/trend_charts.py` | Trend Charts Visualizer | Generates line, area, column, and combo charts with thread safety (`PLOT_LOCK`) and high DPI (`dpi=200`) image rendering. | `matplotlib`, `pandas`, `threading` |
+| `powerbi_visuals/geo_charts.py` | Geo Charts Visualizer | Generates interactive bubble and choropleth maps with NaN radius safeguards. | `folium`, `pandas` |
 | `utils/fonts.py` | PDF Font Utility | Core downloader and registrar for PDF report fonts. | `os`, `urllib`, `reportlab` |
 | `utils/job_tracker.py` | Job Tracking Utility | Thread-safe tracking and polling of background cleaning jobs. | `threading` |
 | `generate_test_data.py` | Script | Generates a synthetic dataset for testing data cleaning capabilities. | `pandas`, `numpy`, `random` |
+| `tests/test_cleaning_engine.py` | Test Suite | Comprehensive unit tests for intent parsing, validation, execution safety, datatype conversions, and realistic NL prompts (26 test cases). | `pytest`, `pandas`, `numpy`, `services.cleaning` |
 | `static/app.js` | Frontend JS | Handles dynamic settings state storage (`localStorage`), settings modal save handlers, `contentEditable` interactive cell editing in data preview table, and sends custom LLM parameters in API requests. | None |
 | `static/index.html` | Frontend UI | Re-architected settings panel enabling selection of LLM Providers (OpenAI, Anthropic, Gemini, Ollama, OpenRouter, Nvidia) and Model names. | `static/style.css`, `static/app.js` |
+
 
 ---
 

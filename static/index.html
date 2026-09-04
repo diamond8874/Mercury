@@ -203,37 +203,52 @@
                                     </div>
                                 </div>
                                 
-                                <!-- TAB 3: Charts -->
+                                <!-- TAB 3: Charts & PowerBI Visual Gallery -->
                                 <div class="tab-pane" id="tab-viz">
                                     <div class="bi-builder-container">
-                                        <!-- Left Sidebar: AI Visual Builder -->
-                                        <div class="bi-sidebar" style="display: flex; flex-direction: column;">
-                                            <h4>AI Visual Builder</h4>
-                                            <p class="text-muted" style="font-size: 0.85rem; margin-bottom: 10px;">
-                                                Select a visual type, or type what you want to see.
+                                        <!-- Left Sidebar: PowerBI Visual Gallery -->
+                                        <div class="bi-sidebar" style="display: flex; flex-direction: column; width: 320px; overflow-y: auto;">
+                                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                                                <h4 style="margin: 0;"><i class="fa-solid fa-chart-line" style="color: var(--primary-light);"></i> Visual Gallery</h4>
+                                                <span class="badge" id="pinned-charts-badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">
+                                                    <i class="fa-solid fa-thumbtack"></i> <span id="pinned-count-num">0</span> Pinned
+                                                </span>
+                                            </div>
+                                            <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 12px;">
+                                                Click any chart icon below to pick columns and generate on demand without server overload.
                                             </p>
-                                            
-                                            <!-- Quick Select Options -->
-                                            <div class="bi-visual-grid" id="ai-quick-viz-grid" style="margin-bottom: 15px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;">
-                                                <button class="bi-viz-btn" data-type="Bar Chart" title="Bar Chart"><i class="fa-solid fa-chart-bar"></i></button>
-                                                <button class="bi-viz-btn" data-type="Line Chart" title="Line Chart"><i class="fa-solid fa-chart-line"></i></button>
-                                                <button class="bi-viz-btn" data-type="Pie Chart" title="Pie Chart"><i class="fa-solid fa-chart-pie"></i></button>
-                                                <button class="bi-viz-btn" data-type="Scatter Plot" title="Scatter Chart"><i class="fa-solid fa-braille"></i></button>
-                                                <button class="bi-viz-btn" data-type="Histogram" title="Histogram"><i class="fa-solid fa-chart-column"></i></button>
+
+                                            <!-- 11-Category Visual Picker Palette Grid -->
+                                            <div class="bi-visual-grid" id="ai-quick-viz-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 15px;">
+                                                <button class="bi-viz-btn" data-category="trend" data-type="line" title="Line Chart"><i class="fa-solid fa-chart-line"></i><span>Line</span></button>
+                                                <button class="bi-viz-btn" data-category="trend" data-type="area" title="Area Chart"><i class="fa-solid fa-chart-area"></i><span>Area</span></button>
+                                                <button class="bi-viz-btn" data-category="comparison" data-type="bar" title="Bar Chart"><i class="fa-solid fa-chart-bar"></i><span>Bar</span></button>
+                                                <button class="bi-viz-btn" data-category="trend" data-type="column" title="Column Chart"><i class="fa-solid fa-chart-column"></i><span>Column</span></button>
+                                                
+                                                <button class="bi-viz-btn" data-category="part_to_whole" data-type="pie" title="Pie Chart"><i class="fa-solid fa-chart-pie"></i><span>Pie</span></button>
+                                                <button class="bi-viz-btn" data-category="part_to_whole" data-type="donut" title="Donut Chart"><i class="fa-solid fa-circle-notch"></i><span>Donut</span></button>
+                                                <button class="bi-viz-btn" data-category="part_to_whole" data-type="treemap" title="Treemap"><i class="fa-solid fa-table-cells-large"></i><span>Treemap</span></button>
+                                                <button class="bi-viz-btn" data-category="change_flow" data-type="waterfall" title="Waterfall Chart"><i class="fa-solid fa-water"></i><span>Waterfall</span></button>
+                                                
+                                                <button class="bi-viz-btn" data-category="relationship" data-type="scatter" title="Scatter Plot"><i class="fa-solid fa-braille"></i><span>Scatter</span></button>
+                                                <button class="bi-viz-btn" data-category="distribution" data-type="histogram" title="Histogram"><i class="fa-solid fa-signal"></i><span>Hist</span></button>
+                                                <button class="bi-viz-btn" data-category="single_metric" data-type="gauge" title="Gauge Chart"><i class="fa-solid fa-gauge-high"></i><span>Gauge</span></button>
+                                                <button class="bi-viz-btn" data-category="geo" data-type="bubble_map" title="Geo Bubble Map"><i class="fa-solid fa-earth-americas"></i><span>Map</span></button>
                                             </div>
 
-                                            <div class="ai-viz-prompt-area" style="display: flex; flex-direction: column; gap: 10px; flex-grow: 1;">
-                                                <textarea id="ai-viz-input" class="chat-input" placeholder="e.g. average MSRP by Model Year" style="flex-grow: 1; resize: none; border-radius: 8px; padding: 10px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); min-height: 100px; font-family: inherit;"></textarea>
-                                                <button class="btn btn-primary" id="ai-viz-btn" style="width: 100%;"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate Visual</button>
+                                            <div class="ai-viz-prompt-area" style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;">
+                                                <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);"><i class="fa-solid fa-wand-magic-sparkles"></i> Or Ask AI to Build Chart:</label>
+                                                <textarea id="ai-viz-input" class="chat-input" placeholder="e.g. show me a waterfall chart of Salary by Gender" style="resize: none; border-radius: 8px; padding: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid rgba(255,255,255,0.1); min-height: 60px; font-family: inherit; font-size: 0.85rem;"></textarea>
+                                                <button class="btn btn-primary" id="ai-viz-btn" style="width: 100%;"><i class="fa-solid fa-bolt"></i> Generate via AI</button>
                                             </div>
                                         </div>
                                         
-                                        <!-- Main Canvas -->
+                                        <!-- Main Canvas Display -->
                                         <div class="bi-canvas">
                                             <div id="dashboard-charts-grid" class="bi-chart-display">
                                                 <div class="bi-placeholder">
-                                                    <i class="fa-solid fa-wand-magic-sparkles" style="font-size: 3rem; margin-bottom: 1rem; color: var(--text-muted)"></i>
-                                                    <p>Select a visual type and assign fields to render a chart.</p>
+                                                    <i class="fa-solid fa-chart-line" style="font-size: 3rem; margin-bottom: 1rem; color: var(--text-muted)"></i>
+                                                    <p>Select a visual icon on the left to configure fields and generate a chart on demand.</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -382,6 +397,33 @@
         </div>
     </div>
 
+
+    <!-- Chart Configuration Modal -->
+    <div class="modal-overlay hidden" id="chart-config-modal">
+        <div class="glass-card modal-content" style="max-width: 480px; width: 90%;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-chart-line" id="modal-chart-icon" style="color: var(--primary-light);"></i> <span id="modal-chart-title">Configure Visual</span></h3>
+                <button class="btn-icon close-modal-btn" id="close-chart-modal-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body" style="display: flex; flex-direction: column; gap: 14px; padding: 15px 0;">
+                <input type="hidden" id="modal-chart-category">
+                <input type="hidden" id="modal-chart-type">
+
+                <div class="form-group">
+                    <label for="modal-x-col" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.85rem;"><i class="fa-solid fa-font"></i> X-Axis / Category Column:</label>
+                    <select id="modal-x-col" class="form-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(15,23,42,0.8); color: white; border: 1px solid rgba(255,255,255,0.15);"></select>
+                </div>
+                <div class="form-group">
+                    <label for="modal-y-col" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.85rem;"><i class="fa-solid fa-arrow-trend-up"></i> Y-Axis / Metric Column:</label>
+                    <select id="modal-y-col" class="form-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(15,23,42,0.8); color: white; border: 1px solid rgba(255,255,255,0.15);"></select>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; padding-top: 10px;">
+                <button class="btn btn-secondary" id="cancel-chart-modal-btn">Cancel</button>
+                <button class="btn btn-primary" id="render-chart-modal-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate Visual</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Application Script -->
     <script src="app.js"></script>

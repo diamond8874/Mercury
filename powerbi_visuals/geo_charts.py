@@ -35,10 +35,11 @@ def render_bubble_map(df: pd.DataFrame, lat_col: str, lon_col: str, size_col: st
             if pd.isna(row[lat_col]) or pd.isna(row[lon_col]):
                 continue
             
-            radius = 5
-            if sizes is not None:
-                if max_s > min_s:
-                    radius = 3 + 15 * ((row[size_col] - min_s) / (max_s - min_s))
+            radius = 5.0
+            if sizes is not None and idx in sizes.index:
+                val = sizes.loc[idx]
+                if pd.notna(val) and max_s > min_s:
+                    radius = 3.0 + 15.0 * float((val - min_s) / (max_s - min_s))
                 
             tooltip = str(row[tooltip_col]) if tooltip_col and tooltip_col in df.columns else None
             

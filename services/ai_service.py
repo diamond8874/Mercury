@@ -1,4 +1,3 @@
-from _pytest import cacheprovider
 import os
 import litellm
 import logging
@@ -33,7 +32,8 @@ class UnifiedLLMClient:
                 litellm_args = {
                     "model": model_name,
                     "messages": messages,
-                    "stream": stream
+                    "stream": stream,
+                    "timeout": 45.0  # 45s timeout to allow large 70B models to complete response
                 }
                 if temperature is not None:
                     litellm_args["temperature"] = temperature
@@ -66,21 +66,26 @@ class UnifiedLLMClient:
         # If no model is explicitly requested, auto-select based on available API keys
         if not model_name or model_name.strip() == "":
             if self.api_key or os.environ.get("NVIDIA_API_KEY"):
-                model_name = "meta/llama-3.3-70b-instruct"
+                model_name = "nvidia/llama-3.1-nemotron-70b-instruct"
             elif os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
                 model_name = "gemini-2.5-flash"
             elif os.environ.get("GROQ_API_KEY"):
-                model_name = "llama-3.3-70b-versatile"
+                model_name = "llama-3.1-70b-versatile"
             elif os.environ.get("OPENAI_API_KEY"):
                 model_name = "gpt-4o-mini"
             elif os.environ.get("ANTHROPIC_API_KEY"):
                 model_name = "claude-3-5-haiku-20241022"
             else:
-                model_name = "meta/llama-3.3-70b-instruct"
+                model_name = "nvidia/llama-3.1-nemotron-70b-instruct"
+
+        # Replace deprecated/end-of-life models globally
+        deprecated_tokens = ["llama-3.3-70b", "llama-3.1-70b", "llama-3.3-70b-instruct", "llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct"]
+        if any(tok in model_name for tok in deprecated_tokens):
+            model_name = "nvidia/llama-3.1-nemotron-70b-instruct"
 
         model_lower = model_name.lower()
 
-        # Check if model has a provider prefix like "gemini/gemini-1.5-flash" or "groq/llama-3.3-70b-versatile"
+        # Check if model has a provider prefix like "gemini/gemini-1.5-flash"
         detected_provider = None
         if "/" in model_name:
             prefix = model_name.split("/")[0].lower()
@@ -98,7 +103,7 @@ class UnifiedLLMClient:
                 detected_provider = "ollama"
             elif "gpt-" in model_lower or "gpt" in model_lower:
                 detected_provider = "openai"
-            elif "glm" in model_lower or "nvidia" in model_lower or "nemotron" in model_lower:
+            elif "glm" in model_lower or "nvidia" in model_lower or "nemotron" in model_lower or "llama" in model_lower:
                 detected_provider = "nvidia"
 
         # Resolve provider: Model-based auto-detection takes precedence if explicit model implies a provider
@@ -106,11 +111,11 @@ class UnifiedLLMClient:
         if not provider or provider.strip() == "":
             if "gemini" in model_lower:
                 provider = "gemini"
-            elif "groq" in model_lower or "llama" in model_lower:
+            elif "groq" in model_lower:
                 provider = "groq"
             elif "gpt" in model_lower or "openai" in model_lower:
                 provider = "openai"
-            elif "nvidia" in model_lower or "nemotron" in model_lower or "glm" in model_lower:
+            elif "nvidia" in model_lower or "nemotron" in model_lower or "glm" in model_lower or "llama" in model_lower:
                 provider = "nvidia"
             else:
                 provider = "nvidia"
@@ -122,6 +127,19 @@ class UnifiedLLMClient:
         # Resolve API key and Base URL based on resolved provider
         api_key = self.api_key
         base_url = self.base_url
+
+        if api_key:
+            api_key = str(api_key).strip().strip("'").strip('"')
+            if api_key.startswith("nvapi-"):
+                provider = "nvidia"
+            elif api_key.startswith("sk-proj-") or (api_key.startswith("sk-") and not api_key.startswith("sk-ant-")):
+                provider = "openai"
+            elif api_key.startswith("AIzaSy"):
+                provider = "gemini"
+            elif api_key.startswith("gsk_"):
+                provider = "groq"
+            elif api_key.startswith("sk-ant-"):
+                provider = "anthropic"
 
         if provider == "openai":
             if not api_key:
@@ -165,12 +183,18 @@ class UnifiedLLMClient:
             
             clean_name = model_name.replace("openai/", "")
             model_mapping = {
-                "nemotron": "nvidia/nemotron-3.5-lightning-30b-a3b",
+                "nemotron": "nvidia/llama-3.1-nemotron-70b-instruct",
                 "nemotron-3.5-lightning": "nvidia/nemotron-3.5-lightning-30b-a3b",
-                "llama3": "meta/llama-3.3-70b-instruct",
-                "llama-3.3-70b": "meta/llama-3.3-70b-instruct",
+                "llama3": "nvidia/llama-3.1-nemotron-70b-instruct",
+                "llama-3.3-70b": "nvidia/llama-3.1-nemotron-70b-instruct",
+                "llama-3.3-70b-instruct": "nvidia/llama-3.1-nemotron-70b-instruct",
+                "meta/llama-3.3-70b-instruct": "nvidia/llama-3.1-nemotron-70b-instruct",
+                "llama-3.1-70b": "nvidia/llama-3.1-nemotron-70b-instruct",
+                "llama-3.1-70b-instruct": "nvidia/llama-3.1-nemotron-70b-instruct",
+                "meta/llama-3.1-70b-instruct": "nvidia/llama-3.1-nemotron-70b-instruct",
                 "glm-5.2": "z-ai/glm-5.2"
             }
+
             mapped_name = model_mapping.get(clean_name.lower(), clean_name)
             model_name = f"openai/{mapped_name}"
 

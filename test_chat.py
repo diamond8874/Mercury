@@ -1,9 +1,15 @@
-import requests
+import os
+import sys
 import json
 import time
+import requests
+
+sys.stdout.reconfigure(encoding='utf-8')
 
 base_url = "http://localhost:5000"
 file_path = r"C:\Users\ACER\OneDrive\Desktop\MIT\EV_Dataset.csv"
+if not os.path.exists(file_path):
+    file_path = os.path.join(os.path.dirname(__file__), "test_dirty_data.xlsx")
 
 if __name__ == "__main__":
     print("1. Uploading file...")

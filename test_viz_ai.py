@@ -2,8 +2,12 @@ import requests
 import json
 import time
 
+import os
+
 base_url = "http://localhost:5000"
 file_path = r"C:\Users\ACER\OneDrive\Desktop\MIT\EV_Dataset.csv"
+if not os.path.exists(file_path):
+    file_path = os.path.join(os.path.dirname(__file__), "test_dirty_data.xlsx")
 
 if __name__ == "__main__":
     print("1. Uploading file...")
@@ -33,7 +37,7 @@ if __name__ == "__main__":
 
     print("\n3. Testing AI Text-to-Chart API...")
     viz_chat_payload = {
-        "message": "Show me a pie chart of Electric Range",
+        "message": "Show me a pie chart of Salary",
         "api_key": ""
     }
     viz_chat_res = requests.post(f"{base_url}/api/sessions/{session_id}/viz_chat", json=viz_chat_payload)

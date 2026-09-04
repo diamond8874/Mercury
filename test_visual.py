@@ -1,9 +1,15 @@
 import requests
 import json
 import time
+import os
+import sys
+
+sys.stdout.reconfigure(encoding='utf-8')
 
 base_url = "http://localhost:5000"
 file_path = r"C:\Users\ACER\OneDrive\Desktop\MIT\EV_Dataset.csv"
+if not os.path.exists(file_path):
+    file_path = os.path.join(os.path.dirname(__file__), "test_dirty_data.xlsx")
 
 if __name__ == "__main__":
     print("1. Uploading file...")
@@ -14,10 +20,17 @@ if __name__ == "__main__":
     session_id = upload_res.json()["session_id"]
     print(f"Session ID: {session_id}")
 
+    cols = upload_res.json().get("columns", [])
+    num_cols = [c["name"] for c in cols if 'int' in c.get("type", "").lower() or 'float' in c.get("type", "").lower()]
+    cat_cols = [c["name"] for c in cols if c["name"] not in num_cols]
+
+    first_col = cat_cols[0] if cat_cols else (cols[0]["name"] if cols else "Model_Year")
+    second_col = num_cols[0] if num_cols else (cols[1]["name"] if len(cols) > 1 else first_col)
+
     print("2. Processing data...")
     process_payload = {
         "session_id": session_id,
-        "actions": {"Model_Year": {"action": "keep", "reason": "", "transformation": ""}}
+        "actions": {first_col: {"action": "keep", "reason": "", "transformation": ""}}
     }
     process_res = requests.post(f"{base_url}/api/process", json=process_payload)
     print(f"Process Response: {process_res.status_code}")
@@ -31,12 +44,12 @@ if __name__ == "__main__":
             break
         time.sleep(2)
 
-    print("\n3. Requesting a Bar Chart (comparison, bar) for Model_Year and Base_MSRP...")
+    print(f"\n3. Requesting a Bar Chart (comparison, bar) for {first_col} and {second_col}...")
     viz_payload = {
         "chart_category": "comparison",
         "chart_type": "bar",
-        "x_col": "Model_Year",
-        "y_col": "Base_MSRP"
+        "x_col": first_col,
+        "y_col": second_col
     }
     viz_res = requests.post(f"{base_url}/api/sessions/{session_id}/custom_chart", json=viz_payload)
 

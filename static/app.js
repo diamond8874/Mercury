@@ -523,9 +523,9 @@ function renderLoadedSessionUI() {
         return;
     }
     
-    // If goal is set, show split screen dashboard
+    // Show split screen dashboard
     els.workspaceTitle.textContent = s.name;
-    els.workspaceSubtitle.textContent = `Goal: ${s.goal}`;
+    els.workspaceSubtitle.textContent = '';
     
     els.sectionStep1.classList.remove('active');
     els.sectionSplitDashboard.classList.add('active');
@@ -664,15 +664,27 @@ async function triggerBackgroundProcess() {
 
 /** Poll /status every 2s for both analysis and data-processing jobs */
 let _statusPollTimer = null;
+let _statusPollCount = 0;
 function startStatusPolling(sessionId, opts = {}) {
     // Cancel any existing poll
     if (_statusPollTimer) { clearInterval(_statusPollTimer); _statusPollTimer = null; }
+    _statusPollCount = 0;
     const mode = opts.mode || 'process'; // 'analyze' | 'process'
 
     _statusPollTimer = setInterval(async () => {
         if (!appState.activeSessionId || appState.activeSessionId !== sessionId) {
             clearInterval(_statusPollTimer); _statusPollTimer = null; return;
         }
+        _statusPollCount++;
+
+        // Timeout safeguard (12s) - immediately force hide loader if slow
+        if (_statusPollCount > 6) {
+            clearInterval(_statusPollTimer); _statusPollTimer = null;
+            showBgProcessingIndicator(false);
+            hideLoader();
+            return;
+        }
+
         try {
             const res = await fetch(`/api/sessions/${sessionId}/status`);
             const job = await res.json();
@@ -755,6 +767,9 @@ function startStatusPolling(sessionId, opts = {}) {
                 hideLoader();
                 appendChatBubbleUI('assistant', `⚠️ Error: ${job.error}`, true);
                 console.warn('Job error:', job.error);
+            } else if (job.status === 'idle') {
+                clearInterval(_statusPollTimer); _statusPollTimer = null;
+                showBgProcessingIndicator(false);
             }
         } catch (pollErr) {
             console.warn('Status poll error:', pollErr);
@@ -870,13 +885,15 @@ function renderSchemaActionsGrid() {
         transInput.addEventListener('input', (e) => {
             s.column_actions[col.name].transformation = e.target.value;
         });
-        
+
         // Trigger auto reprocess when user finishes editing transform text (on change or blur or enter)
         transInput.addEventListener('change', () => {
             els.processDataBtn.disabled = false;
+            autoReprocessWithGridState();
         });
         transInput.addEventListener('blur', () => {
             els.processDataBtn.disabled = false;
+            autoReprocessWithGridState();
         });
         transInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
@@ -884,17 +901,21 @@ function renderSchemaActionsGrid() {
                 transInput.blur();
             }
         });
-        
+
         grid.appendChild(card);
     });
-    
+
     recalcSummaryCounts();
 }
 
 /** Triggers background data processing on the server with current manual grid actions */
 async function autoReprocessWithGridState() {
-    // Disabled: do not auto-trigger full processing on every schema change.
-    // Users should press Process Data once they are happy with the schema actions.
+    if (!appState.activeSessionId) return;
+    try {
+        await executePandasProcess();
+    } catch (err) {
+        console.error('Auto-reprocess error:', err);
+    }
 }
 
 
@@ -1242,19 +1263,18 @@ async function sendChatUserMessage() {
                         const parsed = JSON.parse(raw);
 
                         if (eventType === 'schema_updates') {
-                            // Apply schema updates to local state (no re-fetch needed)
+                            // Apply schema updates to local state
                             if (parsed.column_actions) {
                                 appState.sessionData.column_actions = parsed.column_actions;
                             }
-                            if (parsed.schema_updates && Object.keys(parsed.schema_updates).length > 0) {
-                                renderSchemaActionsGrid();
-                                if (els.processDataBtn) {
-                                    els.processDataBtn.disabled = false;
-                                }
-                                if (parsed.trigger_reprocess) {
-                                    startStatusPolling(appState.activeSessionId, { mode: 'process' });
-                                    showBgProcessingIndicator(true);
-                                }
+                            renderSchemaActionsGrid();
+                            if (els.processDataBtn) {
+                                els.processDataBtn.disabled = false;
+                            }
+                            if (parsed.trigger_reprocess) {
+                                startStatusPolling(appState.activeSessionId, { mode: 'process' });
+                                showBgProcessingIndicator(true);
+                                autoReprocessWithGridState();
                             }
                             eventType = 'message'; // Reset for next event
 
@@ -1356,16 +1376,79 @@ function initPowerBIBuilder() {
     const canvas = document.getElementById('dashboard-charts-grid');
     const quickVizBtns = document.querySelectorAll('#ai-quick-viz-grid .bi-viz-btn');
     
+    // Modal elements
+    const configModal = document.getElementById('chart-config-modal');
+    const closeModalBtn = document.getElementById('close-chart-modal-btn');
+    const cancelModalBtn = document.getElementById('cancel-chart-modal-btn');
+    const renderModalBtn = document.getElementById('render-chart-modal-btn');
+    const modalXCol = document.getElementById('modal-x-col');
+    const modalYCol = document.getElementById('modal-y-col');
+    const modalCategoryInput = document.getElementById('modal-chart-category');
+    const modalTypeInput = document.getElementById('modal-chart-type');
+    const modalTitleSpan = document.getElementById('modal-chart-title');
+
     if(!aiBtn) return; // fail safe
 
+    // Function to populate column dropdowns in modal
+    const populateColumnDropdowns = () => {
+        if (!appState.sessionData || !appState.sessionData.columns) return;
+        modalXCol.innerHTML = '';
+        modalYCol.innerHTML = '';
+
+        appState.sessionData.columns.forEach(col => {
+            const optX = document.createElement('option');
+            optX.value = col.name;
+            optX.textContent = `${col.name} (${col.type})`;
+            modalXCol.appendChild(optX);
+
+            const optY = document.createElement('option');
+            optY.value = col.name;
+            optY.textContent = `${col.name} (${col.type})`;
+            modalYCol.appendChild(optY);
+        });
+
+        // Smart default: pick first categorical for X, first numeric for Y
+        const numCols = appState.sessionData.columns.filter(c => c.type.includes('int') || c.type.includes('float'));
+        const catCols = appState.sessionData.columns.filter(c => !numCols.includes(c));
+
+        if (catCols.length > 0) modalXCol.value = catCols[0].name;
+        if (numCols.length > 0) modalYCol.value = numCols[0].name;
+    };
+
+    // Quick Visual Picker Gallery Buttons -> Opens Modal
     quickVizBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            const chartType = btn.dataset.type;
-            aiInput.value = `Make a ${chartType} of `;
-            aiInput.focus();
+            if (!appState.activeSessionId) return alert('Please upload a dataset first.');
+            const category = btn.dataset.category || 'comparison';
+            const type = btn.dataset.type || 'bar';
+
+            modalCategoryInput.value = category;
+            modalTypeInput.value = type;
+            modalTitleSpan.textContent = `Configure ${type.toUpperCase().replace('_', ' ')} Visual`;
+
+            populateColumnDropdowns();
+            configModal.classList.remove('hidden');
         });
     });
 
+    const hideChartModal = () => configModal.classList.add('hidden');
+    if (closeModalBtn) closeModalBtn.addEventListener('click', hideChartModal);
+    if (cancelModalBtn) cancelModalBtn.addEventListener('click', hideChartModal);
+
+    // Modal Render Button -> Triggers custom_chart API
+    if (renderModalBtn) {
+        renderModalBtn.addEventListener('click', async () => {
+            hideChartModal();
+            const category = modalCategoryInput.value;
+            const type = modalTypeInput.value;
+            const xCol = modalXCol.value;
+            const yCol = modalYCol.value;
+
+            await renderCustomVisual({ chart_category: category, chart_type: type, x_col: xCol, y_col: yCol });
+        });
+    }
+
+    // AI Text Prompt Generator
     aiBtn.addEventListener('click', async () => {
         const message = aiInput.value.trim();
         if(!message) return alert('Please enter a request for the AI.');
@@ -1375,17 +1458,7 @@ function initPowerBIBuilder() {
         aiBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating...';
         aiBtn.disabled = true;
 
-        canvas.innerHTML = `
-            <div class="progress-container" style="width: 80%; max-width: 400px; text-align: center; margin: auto; padding-top: 20%;">
-                <h4 id="viz-progress-text" style="margin-bottom: 15px; color: var(--text-muted); font-weight: normal;">1. AI is analyzing your request...</h4>
-                <div class="progress-bar-bg" style="width: 100%; background: rgba(255,255,255,0.1); border-radius: 10px; height: 10px; overflow: hidden;">
-                    <div id="viz-progress-fill" style="width: 20%; background: var(--primary); height: 100%; border-radius: 10px; transition: width 0.4s ease;"></div>
-                </div>
-            </div>
-        `;
-
         try {
-            // 1. Get chart parameters from AI
             const aiRes = await fetch(`/api/sessions/${appState.activeSessionId}/viz_chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1400,45 +1473,8 @@ function initPowerBIBuilder() {
             const aiData = await aiRes.json();
             if(!aiRes.ok) throw new Error(aiData.error || 'Failed to parse AI request');
             
-            const payload = aiData.params;
-            
-            // Update progress bar
-            const progText = document.getElementById('viz-progress-text');
-            const progFill = document.getElementById('viz-progress-fill');
-            if(progText) progText.innerText = "2. Rendering visual...";
-            if(progFill) progFill.style.width = "70%";
-            
-            // 2. Generate the chart
-            const res = await fetch(`/api/sessions/${appState.activeSessionId}/custom_chart`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await res.json();
-            if(!res.ok) throw new Error(data.error || 'Failed to generate visual');
+            await renderCustomVisual(aiData.params);
 
-            if(progFill) progFill.style.width = "100%";
-            await new Promise(r => setTimeout(r, 200)); // smooth animation wait
-            
-            canvas.innerHTML = '';
-            
-            if (data.chart.type === 'image') {
-                const img = document.createElement('img');
-                img.src = `data:image/png;base64,${data.chart.data}`;
-                img.className = 'bi-chart-image fade-in';
-                canvas.appendChild(img);
-            } else if (data.chart.type === 'html') {
-                canvas.innerHTML = data.chart.data;
-            } else if (data.chart.type === 'plotly') {
-                const plotDiv = document.createElement('div');
-                plotDiv.id = `plotly-canvas-${Date.now()}`;
-                plotDiv.style.width = '100%';
-                plotDiv.style.height = '100%';
-                canvas.appendChild(plotDiv);
-                setTimeout(() => {
-                    Plotly.newPlot(plotDiv.id, data.chart.data.data, data.chart.data.layout);
-                }, 100);
-            }
         } catch (err) {
             alert(err.message);
         } finally {
@@ -1447,4 +1483,108 @@ function initPowerBIBuilder() {
             aiInput.value = '';
         }
     });
+
+    // Helper: Execute custom_chart API and display chart with "Add to Report" pinning
+    async function renderCustomVisual(params) {
+        canvas.innerHTML = `
+            <div class="progress-container" style="width: 80%; max-width: 400px; text-align: center; margin: auto; padding-top: 15%;">
+                <h4 style="margin-bottom: 12px; color: var(--text-muted); font-weight: normal;"><i class="fa-solid fa-spinner fa-spin"></i> Rendering ${params.chart_type} visual...</h4>
+                <div class="progress-bar-bg" style="width: 100%; background: rgba(255,255,255,0.1); border-radius: 10px; height: 8px; overflow: hidden;">
+                    <div style="width: 80%; background: var(--primary); height: 100%; border-radius: 10px;"></div>
+                </div>
+            </div>
+        `;
+
+        try {
+            const res = await fetch(`/api/sessions/${appState.activeSessionId}/custom_chart`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(params)
+            });
+            const data = await res.json();
+            if(!res.ok) throw new Error(data.error || 'Failed to generate visual');
+
+            canvas.innerHTML = '';
+
+            const card = document.createElement('div');
+            card.className = 'glass-card chart-card fade-in';
+            card.style.cssText = 'padding: 15px; display: flex; flex-direction: column; gap: 12px; width: 100%;';
+
+            const titleText = `${params.y_col || ''} by ${params.x_col || ''} (${(params.chart_type || '').toUpperCase()})`;
+
+            const headerHTML = `
+                <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">
+                    <h4 style="margin: 0; font-size: 1rem; color: white;"><i class="fa-solid fa-chart-line" style="color: var(--primary-light);"></i> ${titleText}</h4>
+                    <button class="btn btn-secondary pin-report-btn" style="font-size: 0.8rem; padding: 5px 12px; border-radius: 20px; transition: all 0.2s;">
+                        <i class="fa-solid fa-thumbtack"></i> <span>Add to PDF Report</span>
+                    </button>
+                </div>
+            `;
+
+            card.innerHTML = headerHTML;
+
+            const contentDiv = document.createElement('div');
+            contentDiv.style.cssText = 'flex-grow: 1; min-height: 320px; display: flex; justify-content: center; align-items: center;';
+
+            if (data.chart.type === 'image') {
+                const img = document.createElement('img');
+                img.src = `data:image/png;base64,${data.chart.data}`;
+                img.style.cssText = 'max-width: 100%; max-height: 420px; border-radius: 8px; object-fit: contain;';
+                contentDiv.appendChild(img);
+            } else if (data.chart.type === 'html') {
+                contentDiv.innerHTML = data.chart.data;
+            }
+            card.appendChild(contentDiv);
+            canvas.appendChild(card);
+
+            // Bind Pin to Report Button
+            const pinBtn = card.querySelector('.pin-report-btn');
+            if (pinBtn) {
+                const chartPayload = {
+                    title: titleText,
+                    chart_type: params.chart_type,
+                    x_axis: params.x_col,
+                    y_axis: params.y_col,
+                    description: `Custom visual generated for ${titleText}`
+                };
+
+                pinBtn.addEventListener('click', async () => {
+                    try {
+                        const pinRes = await fetch(`/api/sessions/${appState.activeSessionId}/pin_chart`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ chart: chartPayload })
+                        });
+                        const pinData = await pinRes.json();
+                        if (!pinRes.ok) throw new Error(pinData.error);
+
+                        const countSpan = document.getElementById('pinned-count-num');
+                        if (countSpan) countSpan.textContent = pinData.pinned_count;
+
+                        if (pinData.is_pinned) {
+                            pinBtn.style.background = 'rgba(16, 185, 129, 0.25)';
+                            pinBtn.style.color = '#10b981';
+                            pinBtn.style.borderColor = '#10b981';
+                            pinBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Pinned to PDF Report</span>';
+                        } else {
+                            pinBtn.style.background = '';
+                            pinBtn.style.color = '';
+                            pinBtn.style.borderColor = '';
+                            pinBtn.innerHTML = '<i class="fa-solid fa-thumbtack"></i> <span>Add to PDF Report</span>';
+                        }
+                    } catch (pinErr) {
+                        alert(pinErr.message);
+                    }
+                });
+            }
+
+        } catch (err) {
+            canvas.innerHTML = `
+                <div class="bi-placeholder" style="color: #ef4444;">
+                    <i class="fa-solid fa-circle-exclamation" style="font-size: 2.5rem; margin-bottom: 1rem;"></i>
+                    <p>${err.message}</p>
+                </div>
+            `;
+        }
+    }
 }

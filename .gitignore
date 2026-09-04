@@ -6,4 +6,5 @@ output_data
 uploads
 fonts
 .env
+test_output_data/
 *.pyc
