@@ -129,10 +129,15 @@ def _handle_keep_only_columns(df: pd.DataFrame, col: str, params: dict) -> tuple
 
 def _handle_normalize_missing(df: pd.DataFrame, col: str, params: dict) -> tuple:
     before_nulls = int(df[col].isnull().sum())
-    df[col] = df[col].astype(str).apply(
-        lambda v: np.nan if _FAKE_NULL_PATTERN.match(v) else v
-    )
-    df[col] = df[col].replace([np.inf, -np.inf], np.nan)
+    def _clean_fake_null(val):
+        if pd.isna(val):
+            return np.nan
+        if isinstance(val, str) and _FAKE_NULL_PATTERN.match(val):
+            return np.nan
+        return val
+
+    df.loc[:, col] = df[col].apply(_clean_fake_null)
+    df.loc[:, col] = df[col].replace([np.inf, -np.inf], np.nan)
     after_nulls = int(df[col].isnull().sum())
     return df, f"Normalized fake nulls in '{col}': {after_nulls - before_nulls} new NaNs."
 
@@ -208,24 +213,25 @@ def _handle_drop_null_rows_column(df: pd.DataFrame, col: str, params: dict) -> t
 
 def _handle_drop_duplicates_full(df: pd.DataFrame, col: str, params: dict) -> tuple:
     before = len(df)
-    df = df.drop_duplicates().reset_index(drop=True)
+    keep = params.get("keep", "first")
+    df = df.drop_duplicates(keep=keep).reset_index(drop=True)
     removed = before - len(df)
-    return df, f"Removed {removed} fully-duplicate rows."
+    return df, f"Removed {removed} fully-duplicate rows (keep='{keep}')."
 
 
 def _handle_drop_duplicates_by_columns(df: pd.DataFrame, col: str, params: dict) -> tuple:
-    subset = params.get("subset", [col])
+    subset = params.get("subset", [col] if col else None)
     keep = params.get("keep", "first")
     if not subset:
-        subset = [col]
-    valid_subset = [c for c in subset if c in df.columns]
-    if not valid_subset:
+        subset = [col] if col else None
+    valid_subset = [c for c in subset if c in df.columns] if subset else None
+    if subset and not valid_subset:
         return df, f"No valid columns in subset {subset} for deduplication."
     before = len(df)
     df = df.drop_duplicates(subset=valid_subset, keep=keep).reset_index(drop=True)
     removed = before - len(df)
-    return df, (f"Removed {removed} duplicate rows based on {valid_subset}, "
-                f"keep='{keep}'.")
+    subset_desc = f"columns {valid_subset}" if valid_subset else "all columns"
+    return df, f"Removed {removed} duplicate rows based on {subset_desc} (keep='{keep}')."
 
 
 def _handle_uppercase(df: pd.DataFrame, col: str, params: dict) -> tuple:
@@ -316,8 +322,9 @@ def _handle_replace_value_exact(df: pd.DataFrame, col: str, params: dict) -> tup
     replacement_dict = {}
     for old_v, new_v in mapping.items():
         replacement_dict[old_v] = new_v
-        replacement_dict[str(old_v).lower()] = new_v
-        replacement_dict[str(old_v).upper()] = new_v
+        if isinstance(old_v, str):
+            replacement_dict[old_v.lower()] = new_v
+            replacement_dict[old_v.upper()] = new_v
         try:
             num_val = float(old_v)
             if num_val.is_integer():
@@ -332,15 +339,20 @@ def _handle_replace_value_exact(df: pd.DataFrame, col: str, params: dict) -> tup
         except (ValueError, TypeError):
             pass
 
+    # Direct replacement on DataFrame preserves dtype and NaN
     df[col] = df[col].replace(replacement_dict)
-    # Apply regex-based exact cell replacement for string columns
-    for k, v in list(replacement_dict.items()):
-        if isinstance(k, str):
-            pattern = r'(?i)^' + re.escape(k) + r'$'
-            try:
-                df[col] = df[col].astype(str).replace(to_replace=pattern, value=v, regex=True)
-            except Exception:
-                pass
+
+    # For string/object columns, apply case-insensitive exact replacement on non-null string cells only
+    if pd.api.types.is_string_dtype(df[col]) or df[col].dtype == object:
+        str_mask = df[col].notna() & df[col].apply(lambda x: isinstance(x, str))
+        if str_mask.any():
+            for k, v in list(replacement_dict.items()):
+                if isinstance(k, str) and not isinstance(v, (list, dict)):
+                    pattern = r'(?i)^' + re.escape(k) + r'$'
+                    try:
+                        df.loc[str_mask, col] = df.loc[str_mask, col].astype(str).replace(to_replace=pattern, value=v, regex=True)
+                    except Exception:
+                        pass
 
     desc = ", ".join([f"'{k}'→'{v}'" for k, v in mapping.items()])
     return df, f"Replaced values in '{col}': {desc}."
@@ -351,7 +363,10 @@ def _handle_replace_value_substring(df: pd.DataFrame, col: str, params: dict) ->
     new = params.get("new", "")
     if not old:
         return df, f"No substring specified for replacement in '{col}'."
-    df[col] = df[col].astype(str).str.replace(old, new, regex=False)
+    # Apply string replacement only to non-null string cells, preserving NaN and non-string types
+    str_mask = df[col].notna() & df[col].apply(lambda x: isinstance(x, str))
+    if str_mask.any():
+        df.loc[str_mask, col] = df.loc[str_mask, col].astype(str).str.replace(old, new, regex=False)
     return df, f"Replaced substring '{old}' with '{new}' in '{col}'."
 
 
@@ -360,14 +375,22 @@ def _handle_replace_value_regex(df: pd.DataFrame, col: str, params: dict) -> tup
     replacement = params.get("replacement", "")
     if not pattern:
         return df, f"No regex pattern specified for '{col}'."
-    df[col] = df[col].astype(str).str.replace(pattern, replacement, regex=True)
+    # Apply regex replacement only to non-null string cells, preserving NaN and non-string types
+    str_mask = df[col].notna() & df[col].apply(lambda x: isinstance(x, str))
+    if str_mask.any():
+        df.loc[str_mask, col] = df.loc[str_mask, col].astype(str).str.replace(pattern, replacement, regex=True)
     return df, f"Applied regex replacement in '{col}': pattern='{pattern}'."
 
 
 def _handle_one_hot_encode(df: pd.DataFrame, col: str, params: dict) -> tuple:
-    dummies = pd.get_dummies(df[col], prefix=col, drop_first=False)
-    df = pd.concat([df.drop(columns=[col]), dummies], axis=1)
-    return df, f"One-hot encoded '{col}' into {dummies.shape[1]} columns."
+    drop_first = params.get("drop_first", False)
+    prefix = params.get("prefix", col)
+    dummies = pd.get_dummies(df[col], prefix=prefix, drop_first=drop_first, dtype=int)
+    col_idx = df.columns.get_loc(col)
+    df = df.drop(columns=[col])
+    for i, new_col in enumerate(dummies.columns):
+        df.insert(col_idx + i, new_col, dummies[new_col])
+    return df, f"One-hot encoded '{col}' into {len(dummies.columns)} binary columns ({list(dummies.columns)[:4]}...)."
 
 
 def _handle_ordinal_encode(df: pd.DataFrame, col: str, params: dict) -> tuple:
@@ -442,13 +465,29 @@ def _handle_standardize_zscore(df: pd.DataFrame, col: str, params: dict) -> tupl
 
 
 def _handle_log_transform(df: pd.DataFrame, col: str, params: dict) -> tuple:
-    df.loc[:, col] = np.log1p(pd.to_numeric(df[col], errors='coerce').clip(lower=0))
-    return df, f"Applied log(1+x) transformation to '{col}'."
+    num = pd.to_numeric(df[col], errors='coerce')
+    neg_mask = num < 0
+    neg_count = int(neg_mask.sum())
+    if neg_count > 0:
+        # Do not silently clip negatives to 0! Mask negative values as NaN with clear reporting
+        num = num.mask(neg_mask, np.nan)
+        df.loc[:, col] = np.log1p(num)
+        return df, f"Applied log(1+x) transformation to '{col}'. Notice: {neg_count} negative values converted to NaN (not silently clipped)."
+    else:
+        df.loc[:, col] = np.log1p(num)
+        return df, f"Applied log(1+x) transformation to '{col}'."
 
 
 def _handle_round_values(df: pd.DataFrame, col: str, params: dict) -> tuple:
     decimals = params.get("decimals", 0)
-    df[col] = pd.to_numeric(df[col], errors='coerce').round(decimals)
+    rounded = pd.to_numeric(df[col], errors='coerce').round(decimals)
+    if decimals == 0:
+        try:
+            df.loc[:, col] = rounded.astype('Int64')
+        except Exception:
+            df.loc[:, col] = rounded
+    else:
+        df.loc[:, col] = rounded
     return df, f"Rounded '{col}' to {decimals} decimal places."
 
 
@@ -616,29 +655,50 @@ def _handle_standardize_datetime(df: pd.DataFrame, col: str, params: dict) -> tu
 
 def _handle_clip_iqr(df: pd.DataFrame, col: str, params: dict) -> tuple:
     num = pd.to_numeric(df[col], errors='coerce')
+    k = float(params.get("k", 1.5))
     q1, q3 = num.quantile(0.25), num.quantile(0.75)
     iqr = q3 - q1
-    lower_b, upper_b = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    lower_b, upper_b = q1 - k * iqr, q3 + k * iqr
+    affected_mask = (num < lower_b) | (num > upper_b)
+    affected_rows = int(affected_mask.sum())
     df.loc[:, col] = num.clip(lower=lower_b, upper=upper_b)
-    return df, f"Clipped IQR outliers in '{col}' (fence: [{lower_b:.2f}, {upper_b:.2f}])."
+    return df, f"Clipped {affected_rows} IQR outlier rows in '{col}' (k={k}, fence: [{lower_b:.2f}, {upper_b:.2f}])."
 
 
 def _handle_drop_iqr_rows(df: pd.DataFrame, col: str, params: dict) -> tuple:
     num = pd.to_numeric(df[col], errors='coerce')
+    k = float(params.get("k", 1.5))
     q1, q3 = num.quantile(0.25), num.quantile(0.75)
     iqr = q3 - q1
-    lower_b, upper_b = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    lower_b, upper_b = q1 - k * iqr, q3 + k * iqr
     before = len(df)
+    affected_mask = (num < lower_b) | (num > upper_b)
+    affected_rows = int(affected_mask.sum())
     df = df[(num >= lower_b) & (num <= upper_b)].reset_index(drop=True)
     removed = before - len(df)
-    return df, f"Removed {removed} IQR outlier rows based on '{col}'."
+    return df, f"Removed {removed} IQR outlier rows based on '{col}' (k={k})."
 
 
 def _handle_clip_percentile(df: pd.DataFrame, col: str, params: dict) -> tuple:
     num = pd.to_numeric(df[col], errors='coerce')
-    low, high = num.quantile(0.01), num.quantile(0.99)
-    df[col] = num.clip(lower=low, upper=high)
-    return df, f"Clipped 1st–99th percentile outliers in '{col}'."
+    low_q = float(params.get("lower_quantile", 0.01))
+    high_q = float(params.get("upper_quantile", 0.99))
+    low_b, high_b = num.quantile(low_q), num.quantile(high_q)
+    affected_mask = (num < low_b) | (num > high_b)
+    affected_rows = int(affected_mask.sum())
+    df.loc[:, col] = num.clip(lower=low_b, upper=high_b)
+    return df, f"Clipped {affected_rows} percentile outlier rows in '{col}' (range: [{low_q*100:.1f}%, {high_q*100:.1f}%])."
+
+
+def _handle_clip_outliers(df: pd.DataFrame, col: str, params: dict) -> tuple:
+    method = params.get("method", "iqr")
+    action = params.get("action", "clip")
+    if method == "percentile":
+        return _handle_clip_percentile(df, col, params)
+    elif action == "drop":
+        return _handle_drop_iqr_rows(df, col, params)
+    else:
+        return _handle_clip_iqr(df, col, params)
 
 
 def _handle_filter_rows(df: pd.DataFrame, col: str, params: dict) -> tuple:
@@ -779,6 +839,7 @@ _HANDLERS = {
     "clip_iqr":                     _handle_clip_iqr,
     "drop_iqr_rows":                _handle_drop_iqr_rows,
     "clip_percentile":              _handle_clip_percentile,
+    "clip_outliers":                _handle_clip_outliers,
     "filter_rows":                  _handle_filter_rows,
     "remove_rows":                  _handle_remove_rows,
     "explode_column":               _handle_explode_column,

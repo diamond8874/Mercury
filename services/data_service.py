@@ -6,21 +6,28 @@ import pandas as pd
 import numpy as np
 from utils.session_manager import load_session, save_session
 from utils.job_tracker import _set_job_state, _update_job_progress
-from services.cleaning import build_cleaning_plan, validate_plan, execute_plan
+from services.cleaning import build_cleaning_plan, validate_plan, execute_plan, run_cleaning_engine
 
 
-# Schema summarization helper for more compact AI prompts
-def summarize_schema(df, max_samples=1):
+# Schema summarization helper with prompt size caps (max columns, max samples, max length)
+def summarize_schema(df, max_samples=1, max_columns=50, max_val_chars=120):
     schema_summary = []
     num_rows = len(df)
-    for col in df.columns:
+    cols_to_process = list(df.columns)[:max_columns]
+    effective_samples = min(max(max_samples, 0), 3)
+
+    for col in cols_to_process:
         nulls = int(df[col].isnull().sum())
         null_pct = round((nulls / num_rows) * 100, 1) if num_rows else 0.0
         unique_count = int(df[col].nunique(dropna=True))
         samples = []
-        if max_samples > 0:
-            samples = df[col].dropna().head(max_samples).tolist()
-            samples = [str(s) for s in samples]
+        if effective_samples > 0:
+            raw_samples = df[col].dropna().head(effective_samples).tolist()
+            # Wrap truncated sample values in delimiters to defend against prompt injection and excessive payload
+            samples = [
+                f"<untrusted_sample_value>{str(s)[:max_val_chars]}</untrusted_sample_value>"
+                for s in raw_samples
+            ]
         schema_summary.append({
             "column_name": col,
             "data_type": str(df[col].dtype),
@@ -28,6 +35,17 @@ def summarize_schema(df, max_samples=1):
             "unique_values_count": unique_count,
             "sample_values": samples
         })
+
+    if len(df.columns) > max_columns:
+        omitted = len(df.columns) - max_columns
+        schema_summary.append({
+            "column_name": f"[... {omitted} additional columns omitted for prompt brevity]",
+            "data_type": "N/A",
+            "null_percentage": 0.0,
+            "unique_values_count": 0,
+            "sample_values": []
+        })
+
     return schema_summary
 
 # Mock AI Recommendations Fallback
@@ -280,110 +298,27 @@ def run_background_process(app, session_id, api_key=None):
             else:
                 df = pd.read_csv(file_path)
 
-            _update_job_progress(session_id, 30, "Rebuilding dataset structure & applying Keep/Drop columns...")
-            initial_shape = df.shape
-            df.columns = df.columns.str.strip()
+            _update_job_progress(session_id, 35, "Running unified cleaning engine (Pydantic schema & transforms)...")
+            
+            clean_res = run_cleaning_engine(df, actions)
+            df = clean_res["df"]
+            stats = clean_res["stats"]
+            audit_log = clean_res["audit_log"]
+            quality_metrics = clean_res["quality_metrics"]
 
-            initial_nulls = df.isnull().sum().to_dict()
-            initial_duplicates = int(df.duplicated().sum())
-
-            columns_to_drop = []
-            transform_actions = []
-
-            for col, col_data in actions.items():
-                action = col_data.get('action')
-                trans = col_data.get('transformation')
-                if col not in df.columns:
-                    continue
-                if action == 'drop':
-                    columns_to_drop.append(col)
-                elif action == 'transform':
-                    try:
-                        df, msg = apply_column_transformation(df, col, trans)
-                        transform_actions.append(msg)
-                    except Exception as tex:
-                        logging.warning(f"BG transform error {col}: {tex}")
-                elif action == 'keep':
-                    # Explicitly preserve column without modification
-                    pass
-
-            _update_job_progress(session_id, 55, "Running Pandas type transformations & data cleaning...")
-            if columns_to_drop:
-                df = df.drop(columns=columns_to_drop)
-
-            final_shape = df.shape
-            final_nulls = df.isnull().sum().to_dict()
-            final_duplicates = int(df.duplicated().sum())
-
-            # Save cleaned Excel
-            output_filename = f"cleaned_{file_id.split('.')[0]}.xlsx"
+            _update_job_progress(session_id, 75, "Saving cleaned dataset output...")
+            output_filename = f"cleaned_{session_id}.xlsx"
             output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
             df.to_excel(output_path, index=False)
             session_data["cleaned_filename"] = output_filename
-
-            stats = {
-                "initial_rows": initial_shape[0], "initial_cols": initial_shape[1],
-                "final_rows": final_shape[0], "final_cols": final_shape[1],
-                "dropped_columns": columns_to_drop,
-                "transformations_applied": transform_actions,
-                "null_before": sum(initial_nulls.values()),
-                "null_after": sum(final_nulls.values()),
-                "duplicate_before": initial_duplicates,
-                "duplicate_after": final_duplicates
-            }
-
+            session_data["audit_log"] = audit_log
+            session_data["quality_metrics"] = quality_metrics
+            session_data["stats"] = stats
 
             # Skip chart generation during background clean processing.
             charts = []
             session_data["charts"] = charts
-
-            # Build rendered chart data
             rendered_charts = []
-            for chart in charts:
-                chart_type = chart.get("chart_type")
-                title = chart.get("title")
-                x_col = chart.get("x_axis")
-                y_col = chart.get("y_axis")
-                desc = chart.get("description")
-                if x_col not in df.columns:
-                    continue
-                chart_item = {"chart_type": chart_type, "title": title, "description": desc,
-                              "x_axis": x_col, "y_axis": y_col, "data": []}
-                try:
-                    if chart_type == 'histogram':
-                        vc = df[x_col].value_counts().head(10)
-                        chart_item["labels"] = [str(x) for x in vc.index]
-                        chart_item["values"] = [int(v) for v in vc.values]
-                    elif chart_type == 'pie':
-                        vc = df[x_col].value_counts().head(6)
-                        chart_item["labels"] = [str(x) for x in vc.index]
-                        chart_item["values"] = [int(v) for v in vc.values]
-                    elif chart_type == 'scatter' and y_col in df.columns:
-                        tmp = df[[x_col, y_col]].dropna().head(100)
-                        chart_item["points"] = [{"x": float(r[x_col]) if pd.api.types.is_numeric_dtype(df[x_col]) else str(r[x_col]),
-                                                  "y": float(r[y_col]) if pd.api.types.is_numeric_dtype(df[y_col]) else str(r[y_col])} for _, r in tmp.iterrows()]
-                    elif chart_type == 'line' and y_col in df.columns:
-                        tmp = df[[x_col, y_col]].dropna().sort_values(by=x_col).head(50)
-                        chart_item["labels"] = [str(x) for x in tmp[x_col]]
-                        chart_item["values"] = [float(y) if pd.api.types.is_numeric_dtype(df[y_col]) else str(y) for y in tmp[y_col]]
-                    elif chart_type == 'bar':
-                        if y_col and y_col in df.columns:
-                            if df[x_col].nunique() < 15:
-                                grouped = df.groupby(x_col)[y_col].mean().head(15)
-                                chart_item["labels"] = [str(x) for x in grouped.index]
-                                chart_item["values"] = [float(v) for v in grouped.values]
-                                chart_item["title"] = f"{title} (Avg)"
-                            else:
-                                tmp = df[[x_col, y_col]].dropna().head(15)
-                                chart_item["labels"] = [str(x) for x in tmp[x_col]]
-                                chart_item["values"] = [float(y) if pd.api.types.is_numeric_dtype(df[y_col]) else str(y) for y in tmp[y_col]]
-                        else:
-                            vc = df[x_col].value_counts().head(15)
-                            chart_item["labels"] = [str(x) for x in vc.index]
-                            chart_item["values"] = [int(v) for v in vc.values]
-                    rendered_charts.append(chart_item)
-                except Exception as cde:
-                    logging.warning(f"BG chart data error {title}: {cde}")
 
             _update_job_progress(session_id, 95, "Compiling final table previews, statistics, and reports...")
             df_preview = df.head(10).copy().astype(object)
@@ -395,14 +330,23 @@ def run_background_process(app, session_id, api_key=None):
                 "stats": stats,
                 "charts": rendered_charts,
                 "preview": preview_data,
+                "quality_metrics": quality_metrics,
+                "audit_log": audit_log,
             }
             session_data.setdefault("bg_result", {})
             session_data["bg_result"] = result_payload
+            session_data["preview"] = preview_data
+            session_data["row_count"] = df.shape[0]
+            session_data["col_count"] = df.shape[1]
+            session_data["status"] = "done"
             save_session(session_data)
 
             _set_job_state(session_id, "done", result=result_payload, progress=100, progress_msg="Done!")
             logging.info(f"Background process complete for session {session_id}")
+            return result_payload
 
         except Exception as ex:
             logging.error(f"Background process error for {session_id}: {ex}")
             _set_job_state(session_id, "error", error=str(ex))
+            raise
+

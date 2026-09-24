@@ -7,7 +7,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Geo Map Visual Fix & Mercury Branding (`powerbi_visuals/geo_charts.py`, `static/index.html`, `static/app.js`)**:
+  - `powerbi_visuals/geo_charts.py`: Fixed `Could not convert string ... to numeric` and Folium's `"Make this Notebook Trusted to load map: File -> Trust Notebook"` display issue. Folium's `_repr_html_()` produces a Jupyter-only wrapper that breaks in standard web browsers when injected into DOM; replaced with `m.get_root().render()` wrapped in a responsive `<iframe srcdoc="...">` with `width: 100%` and `height: 420px`.
+  - Implemented safe numeric coercion (`pd.to_numeric(..., errors='coerce')`) for latitude and longitude columns with coordinate column auto-inference, graceful informative overlay when non-coordinate columns are passed, and switched base tiles to OpenStreetMap.
+  - `static/index.html` & `static/app.js`: Updated application branding to "Mercury" across title, navigation header, and authentication modals. Enhanced visual configuration modal to show context-aware labels ("Latitude Column" and "Longitude Column") with automatic coordinate column pre-selection when configuring Map visuals.
+
+  - `repositories/job_repository.py`: Created transaction-managed repository for background jobs storing job states, payloads, progress messages, and error traces in SQLite WAL mode. Added `fail_stuck_and_interrupted_jobs()` startup recovery and `check_and_fail_timed_out_jobs()` watchdog sweep.
+  - `utils/job_tracker.py`: Replaced in-memory job dictionaries with a bounded `ThreadPoolExecutor(max_workers=2)` delegating to `job_repository`. Automatically transitions job state to `succeeded` or `failed` in a `finally` block and maintains backwards-compatibility bridges.
+  - `routes/jobs.py`: Added dedicated Blueprint for polling background jobs (`GET /api/jobs/<job_id>`) with strict ownership validation returning stealth 404 for cross-user requests.
+  - `routes/cleaning.py` & `routes/reports.py`: Updated `/api/analyze`, `/api/sessions/<id>/trigger_process`, and `/api/sessions/<id>/pdf` to return HTTP `202 Accepted` with a UUID `job_id` instead of blocking synchronous execution.
+  - `app.py`: Integrated startup job recovery to fail in-flight jobs on reboot, and added a background watchdog daemon thread checking for timed-out jobs every 60 seconds.
+  - `tests/test_phase5c_background_jobs.py`: Added 5 comprehensive test cases verifying 202 async dispatch, polling across analyze/process/pdf, cross-user stealth 404, startup crash recovery, and watchdog timeout handling.
+  - Full test suite passes 100% (108/108 tests).
+- **Phase 5B Persistent State & Storage Abstraction (`models/`, `repositories/`, `scripts/migrate_json_to_db.py`, `tests/test_phase5b_persistence.py`, `utils/session_manager.py`)**:
+  - `models/__init__.py`: Created SQLAlchemy relational schema with WAL mode: `SessionModel`, `ColumnActionModel`, `ChatMessageModel`, `OperationLogModel`, `JobModel`, `User`.
+  - `repositories/session_repository.py`: Built thread-safe `SessionRepository` handling transactions, optimistic locking with integer version increments, atomic append-only chat messages, and cascade deletion.
+  - `repositories/storage_backend.py`: Implemented abstracted `StorageBackend` and `LocalStorageBackend` providing isolated `data/<user_id>/<session_id>/` disk structure.
+  - `scripts/migrate_json_to_db.py`: Created idempotent one-off migration script supporting `--dry-run` to import legacy JSON session files into SQLite without duplicate inserts.
+  - `tests/test_phase5b_persistence.py`: Added 5 unit and integration tests verifying concurrent multi-threaded chat append, concurrent state update + chat append, migration idempotency, cascade deletion, and storage backend operations. Full regression suite passes 100% (103/103 tests).
+  - `routes/`: Decomposed the monolithic 2,192-line `components/routes.py` into focused Flask Blueprints under 300 lines each:
+    - `routes/upload.py`: Dataset file upload, magic byte content sniffing, shape limits, and quota enforcement (`POST /api/upload`).
+    - `routes/sessions.py`: Session CRUD, user data deletion, cell updates, and processing status polling (`GET /api/sessions`, `GET/DELETE /api/sessions/<id>`, `DELETE /api/me/data`, `POST /api/sessions/<id>/update_cell`, `GET /api/sessions/<id>/status`).
+    - `routes/cleaning.py`: Background schema analysis, dataset cleaning execution, background triggers, and dry runs (`POST /api/analyze`, `POST /api/process`, `POST /api/sessions/<id>/trigger_process`, `POST /api/sessions/<id>/dry_run`).
+    - `routes/chat.py`: Synchronous and Server-Sent Event streaming chat interactions (`POST /api/sessions/<id>/chat`, `POST /api/sessions/<id>/chat/stream`).
+    - `routes/visualization.py`: AI visual suggestions, custom visual rendering, and chart pinning (`POST /api/sessions/<id>/viz_chat`, `POST /api/sessions/<id>/custom_chart`, `POST/GET /api/sessions/<id>/pin_chart`, `GET /api/sessions/<id>/pinned_charts`).
+    - `routes/reports.py`: PDF report compilation, PDF download, and session dataset downloads (`POST /api/sessions/<id>/pdf`, `GET /api/sessions/<id>/download_pdf`, `GET /api/download/<filename>`, `GET /api/sessions/<id>/download/<kind>`).
+    - `routes/auth.py`: Authentication lifecycle endpoints and root static asset serving (`/api/auth/register`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`, `/`, `/favicon.ico`).
+    - `routes/__init__.py`: Centralized blueprint registration and global JSON error handlers (`401`, `404`, `500`).
+  - `services/`: Extracted all business logic out of route handlers into modular domain services:
+    - `services/dataset_service.py`: Upload ingestion, safe preview records, cleaning pipeline execution, atomic cell value updates, and dry-run plan validation.
+    - `services/chat_service.py`: Non-streaming and streaming multi-turn conversation logic with rule-based fallback.
+    - `services/report_service.py`: ReportLab document building, Lora typography, and Matplotlib figure compilation.
+    - `services/visualization_service.py`: Natural language visualization parameter extraction and dispatching to `powerbi_visuals`.
+  - `utils/quota.py`: Shared per-user active session and disk storage usage calculation utilities.
+  - `components/routes.py`: Replaced monolithic file with a slim backwards-compatibility re-export shim.
+  - Full test suite verified passing 100% (98/98 tests) with identical URL map rules and methods.
+  - `tests/test_phase4e_comprehensive.py`: Created 11 comprehensive end-to-end integration tests verifying:
+    - Rejection of unauthenticated requests to all 21 protected `/api/*` routes with 401 Unauthorized.
+    - Stealth 404 enforcement across all session routes when User B accesses User A's session.
+    - Strict session list isolation where `/api/sessions` returns only sessions owned by the caller.
+    - Download isolation preventing access to other users' output files and rejecting path traversal variants (`../`, `..\\`, `%2e%2e%2f`, `%252e%252e%252f`).
+    - Validation that non-UUID `session_id` inputs return HTTP 400 Bad Request.
+    - SSRF `base_url` matrix rejection (loopback, link-local, cloud metadata, private IPs, DNS rebinding) and acceptance of valid public HTTPS endpoints.
+    - Leak prevention confirming API keys are never captured in logs or written to session JSON files.
+    - Rejection of oversized uploads with HTTP 413 and shape cap violations (rows/columns) with clean HTTP 400.
+    - Flask-Limiter rate limit enforcement triggering HTTP 429 Too Many Requests.
+    - Background cleanup sweeps purging expired sessions and files while preserving active sessions.
+    - Application boot refusal in production (`DEBUG=false`) when `SECRET_KEY` is missing or insecure.
+  - `components/routes.py`: Hardened `/api/download/<filename>` against path traversal and double-encoded variants, requiring valid session UUID association. Updated `/api/process` to check session ownership prior to payload parsing.
+  - `README.md`: Documented full production deployment guidelines (Gunicorn, Waitress, Nginx reverse proxy) and comprehensive environment variable reference.
+
+- **Phase 4D Upload Limits, Rate Limits, Quotas & Cleanup (`utils/upload_validator.py`, `utils/cleanup.py`, `utils/limiter.py`, `config.py`, `app.py`, `components/routes.py`, `utils/session_manager.py`, `requirements.txt`, `tests/test_phase4d_upload_limits.py`)**:
+  - `utils/upload_validator.py`: Built upload content sniffing and validation pipeline. Rejects mismatched magic bytes (e.g. XLSX bytes declared as CSV), enforces row caps (`MAX_ROWS=200,000`) and column caps (`MAX_COLS=500`), restricts XLSX sheet count (`MAX_XLSX_SHEETS=10`), blocks workbooks containing VBA macros (`xl/vbaProject.bin`) or external links (`xl/externalLinks/`), and rejects zip decompression bombs (`MAX_UNCOMPRESSED_BYTES=200MB`).
+  - `utils/limiter.py` & `app.py`: Standardized `Flask-Limiter` with user-aware key resolution (prefers authenticated `current_user.id` over client IP). Applied route-level decorators: 10 uploads/hr on `/api/upload`, 60 chat turns/hr on `/api/sessions/<id>/chat` and `/api/sessions/<id>/chat/stream`, and 10 report compilations/hr on `/api/sessions/<id>/pdf`.
+  - `components/routes.py`: Enforced per-user quotas (max 20 active sessions via `MAX_SESSIONS_PER_USER`, max 500 MB total storage across uploads/outputs via `MAX_STORAGE_BYTES_PER_USER`). Implemented UUID-only on-disk filenames (`<uuid>.<ext>`) preserving original filenames strictly for display metadata. Added authenticated `DELETE /api/me/data` endpoint for total user data erasure.
+  - `utils/cleanup.py`: Implemented `delete_session_files()` shared cleanup helper removing raw uploads, cleaned datasets, generated charts, PDF reports, and session JSON files. Added background thread scheduler `start_cleanup_scheduler()` running periodic TTL expiry sweeps (default 24h inactivity based on `last_accessed`).
+  - `utils/session_manager.py`: Added lazy `_touch_last_accessed()` fire-and-forget worker updating `last_accessed` on session read/load if older than 60 seconds.
+  - `tests/test_phase4d_upload_limits.py`: Added 14 unit and integration tests verifying sniff checks, macro/bomb/shape rejections, delete cascades, TTL cleanup sweep, and UUID storage. Full test suite passes 100% (86/86 tests).
+
+- **Authentication UI (`static/index.html`, `static/app.js`, `static/style.css`)**: Implemented full frontend auth lifecycle — `initAuth()` checks `/api/auth/me` on page load, shows `#auth-modal` when unauthenticated, handles register/login form via `handleAuthSubmit()`, displays user badge, and intercepts 401 responses on all API calls (including `/api/upload`) to re-show the modal.
+
 ### Fixed
+- **`GET /api/sessions` 500 error on null `created_at`** (`components/routes.py`): Legacy sessions storing `"created_at": null` caused `TypeError` during sort. Fixed sort key to `x.get("created_at") or ""` which coerces `None` → `""`.
+- **Upload 401 handling** (`static/app.js`): Added guard to `uploadRawDatasetFile` so expired sessions trigger the auth modal.
+
+### Added (continued)
+- **Phase 4C LLM Provider Safety & Prompt Bounds (`utils/url_validator.py`, `utils/logging_filter.py`, `services/ai_service.py`, `services/data_service.py`, `components/routes.py`, `tests/test_phase4c_llm_safety.py`)**:
+  - `utils/url_validator.py`: Implemented `validate_base_url` for SSRF defense. Enforces HTTPS, resolves hostnames to prevent DNS rebinding, blocks cloud metadata (`169.254.169.254`, `169.254.170.2`), link-local, private networks (10/8, 172.16/12, 192.168/16), multicast, and loopback (in production). Unwraps NAT64 IPv6 (`64:ff9b::/96`) to permit valid dual-stack cloud providers (e.g. Nvidia API). Allows HTTP for localhost dev only when `DEBUG=true`.
+  - `utils/logging_filter.py` & `app.py`: Created `APIKeyRedactionFilter` regex-scrubbing OpenAI, Anthropic, Gemini, Nvidia, Groq keys, and Bearer tokens to `[REDACTED_API_KEY]` across all application and worker logging handlers.
+  - `components/routes.py`: Added base URL validation to `/api/analyze`, `/api/sessions/<id>/chat`, and `/api/sessions/<id>/chat/stream` returning 400 on prohibited URLs.
+  - `services/ai_service.py`: Added `num_retries=2` and `timeout=45.0` to `UnifiedLLMClient.Chat.Completions.create` and enforced base URL validation on direct client instantiation.
+  - `services/data_service.py` & `components/routes.py`: Bounded prompt context to max 50 columns (with truncation annotation), max 3 sample values per column, and max 120 characters per sample string.
+  - `tests/test_phase4c_llm_safety.py`: Added 13 unit and integration tests covering SSRF rejection, URL validation, log redaction, prompt caps, and route rejection. Full test suite passes 100% (72/72 tests).
+
+- **Phase 4B Authentication & Session Ownership (`utils/auth.py`, `app.py`, `components/routes.py`, `config.py`, `tests/test_phase4b_auth.py`)**:
+  - `utils/auth.py`: Built lightweight SQLite user authentication with secure password hashing (`generate_password_hash` via argon2/pbkdf2:sha256). Added `User` model conforming to `Flask-Login` protocols, registration, login, and session ownership guards (`get_owned_session_or_404`).
+  - `components/routes.py`: Applied `login_required_api` decorator across all `/api/*` routes (except health, login, register). Attached `owner_id` to uploaded sessions and isolated session lists (`/api/sessions`) to the authenticated user. Enforced 404 on unowned sessions to prevent ID harvesting.
+  - `tests/test_phase4b_auth.py`: Added 14 unit and integration tests verifying user registration, login, session isolation, cross-user 404 access restrictions, and unowned session migration.
+- **Phase 4A Safe Defaults & Production Hardening (`app.py`, `config.py`, `README.md`, `requirements.txt`, `.env`, `.env.example`, `tests/test_phase4a_safe_defaults.py`, `powerbi_visuals/single_metric_visuals.py`)**:
+  - `app.py`: Implemented `validate_secret_key` enforcing that the app refuses to boot in production (`DEBUG=false`) if `SECRET_KEY` is missing or set to an insecure placeholder. Development/testing modes use safe fallback keys with a warning.
+  - `app.py`: Added global `@app.after_request` security headers hook setting `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, and `Content-Security-Policy` with an exact allowlist for Chart.js, Google Fonts, FontAwesome, and Folium map iframes.
+  - `app.py`: Added `@app.errorhandler(413)` returning a clean JSON error response (`File size exceeds maximum allowed upload limit (16MB)`) instead of raw HTML error pages.
+  - `README.md` & `requirements.txt`: Documented production entrypoints for Gunicorn (`gunicorn -w 4 -b 127.0.0.1:5000 app:app`) on Linux/containers and Waitress (`waitress-serve`) on Windows. Added `gunicorn` and `waitress` to `requirements.txt`.
+  - `single_metric_visuals.py`: Fixed Matplotlib gauge background arc color from CSS `rgba()` string to native Matplotlib RGBA tuple `(1, 1, 1, 0.1)`, preventing 500 errors on gauge visualization generation.
+  - `tests/test_phase4a_safe_defaults.py`: Added 5 unit tests covering secret key validation, security headers, and 413 JSON responses. Full test suite passes 100% (53/53 tests).
+
+- **Phase 3 Data-Correctness Engine & Typed Execution Architecture (`services/cleaning/schema.py`, `services/cleaning/engine.py`, `services/cleaning/executor.py`, `services/cleaning/operation_registry.py`, `services/data_service.py`, `components/routes.py`, `tests/test_phase3_data_correctness.py`)**:
+  - **Typed Pydantic Schemas (`schema.py`)**: Defined typed operation models (`DropColumnOp`, `KeepColumnOp`, `ReplaceValueOp`, `ImputeOp`, `NormalizeOp`, `EncodeOp`, `ParseDateOp`, `DropDuplicatesOp`, `ClipOutliersOp`, `LogTransformOp`, `ConvertTypeOp`, `RoundNumericOp`, `RenameColumnOp`, `StripWhitespaceOp`, `CaseTransformOp`) and pre-execution validation against real DataFrame columns, types, and constraints (`validate_operation_against_dataframe`).
+  - **Single Canonical Cleaning Engine (`engine.py`)**: Built `run_cleaning_engine(df, actions)` serving as the single point of execution for both `/api/process` (`process_dataset`) and background worker `run_background_process`.
+  - **Strict KEEP Semantics**: Kept columns are guaranteed zero modification; completely removed implicit median/"Unknown" imputation.
+  - **Dtype & NaN Preservation**: Removed `astype(str)` whole-column casting in `executor.py` value replacements. Replacements now preserve column dtypes and preserve `NaN` untouched.
+  - **Math & Statistical Corrections**: Fixed log transform to avoid silent clipping of negative values (masks to `np.nan` with audit notice); made outlier clipping/dropping thresholds configurable while reporting affected row counts; defaulted nominal categorical encoding to one-hot encoding; upgraded operation registry keyword matching to word-boundary regexes to prevent short-token substring collisions (`'0'`, `'log'`, `'int'`).
+  - **Audit Logging & Dynamic PDF Reports**: Every operation records typed audit records and computes before/after quality metrics (nulls, duplicates, dtypes, rows affected). PDF reports in `routes.py` now compile executive summaries and quality tables directly from live audit logs.
+  - **Prompt Injection Defense**: Wrapped dataset samples in `<untrusted_sample_value>` tags in `summarize_schema()` and added strict LLM prompt directives forbidding code/instruction execution from inside untrusted samples.
+  - **Test Suite**: Added `tests/test_phase3_data_correctness.py` (10 test cases). Full test suite passes 100% (48/48 tests).
+
+### Fixed
+- **Numerical Rounding Intent Priority & Int64 Precision (`services/cleaning/intent_parser.py` & `services/cleaning/executor.py`)**:
+  - `intent_parser.py`: Moved `round_values` operation detection check (`r'\bround(?:\s+off)?\b'`) above `convert_datatype` in `_detect_operation()`. Previously, prompts like `"Round off all numerical values in the AlcoholConsumption column to the nearest whole number"` were misclassified as `convert_datatype` due to `numeric`/`to` keyword matching. Fixed unit conversion canonical operation return name (`convert_unit`).
+  - `executor.py`: Ensured 0-decimal rounding converts to `.astype('Int64')`, cleanly removing trailing decimals and decimal points in table previews.
+  - Test Suite (`tests/test_rounding.py` & `tests/test_cleaning_engine.py`): Created test suite `tests/test_rounding.py` and updated unit conversion tests, ensuring all 38 pytest cases pass 100%.
+- **Phase 2 Frontend Safety (`static/app.js` & `static/index.html`)**:
+  - `app.js`: Added `escapeHTML()` helper. Replaced `innerHTML` with safe `textContent`/`createElement` patterns in: session list items (user goal/name), chat history bubbles (LLM content now via `renderChatMarkdown`), schema card column names/types/reasons/sample values (dataset cell values), chart card titles/descriptions (AI output), custom chart loading spinner (user param), and chart error messages (`err.message`). Intentionally preserved `contentDiv.innerHTML = data.chart.data` for server-rendered folium HTML maps.
+  - `app.js`: Moved API key from `localStorage` to `sessionStorage` (`llm_api_key`). Old `nvidia_api_key` localStorage entry is auto-removed on next settings save. API key now clears automatically when the browser tab closes.
+  - `index.html`: Added amber data-sharing disclosure notice inside the Settings modal warning users that dataset schema and sample values are sent to the selected LLM provider.
+ (`app.py`, `utils/session_manager.py`, `services/data_service.py`, `requirements.txt`)**:
+  - `app.py`: Updated server startup to read `HOST` (default `127.0.0.1`), `DEBUG` (default `False`), and `PORT` (default `5000`) from environment variables.
+  - `utils/session_manager.py`: Updated `sanitize_session_id` to strictly validate `session_id` as a valid UUID string using `uuid.UUID`.
+  - `services/data_service.py`: Removed dead code loop `for chart in charts:` where `charts = []`.
+  - `requirements.txt`: Added `xlrd==2.0.2` and pinned all dependency versions.
+  - Test Suite (`tests/test_phase1_hygiene.py`, `test_pin_report.py`, `test_chat.py`, `test_visual.py`, `test_viz_ai.py`): Fixed hardcoded Windows file paths (`C:\Users\...`), added `conftest.py` with portable Flask test fixtures, and verified all 35 tests pass 100%.
+- **Cleaned Data Preview & Session Persistence (`services/data_service.py` & `static/app.js`)**: Fixed an issue where reloading the browser page or restoring a session showed updated Action Schema recommendations but reset the Data Preview tab to uncleaned/blank state. Updated `run_background_process()` to persist `preview_data`, `row_count`, `col_count`, and `status="done"` directly to session JSON on disk, and updated `renderLoadedSessionUI()` in `static/app.js` to render the cleaned table preview and visualization charts whenever a session is loaded or refreshed.
 - **Natural Language Transformation Intent Parser (`services/cleaning/intent_parser.py` & `services/data_service.py`)**: Fixed value mapping pattern extraction and prompt standardizer to support natural phrasing like `transform <column> "old" into "new"`. Stripped column noise words (`column`, `col`, `feature`), added `transform` to operation detection keywords, and prevented prompt standardizer from mangling natural verb prompts. Confirmed 100% successful transformation execution (`Others` → `Bugati`).
 - **Natural Human Language Transformation Engine (`services/cleaning/intent_parser.py`)**: Upgraded intent parser, step splitter, and parameter extractor to seamlessly understand natural human instructions in any format (e.g. `0 to No`, `0 -> No`, `0 = No`, `change 0 to No`, `replace Tesla with Tesla Motors`, `convert float`, `fill missing with 0`). Fixed multi-word string truncation and prioritized structural operations (`rename`, `move`, `remove_rows`) to guarantee 100% accurate, error-free data transformations for user prompts.
 - **Security & Session Isolation (Component 1)**: Enforced strict regex validation `^[a-zA-Z0-9_-]+$` on `session_id` in `utils/session_manager.py` to eliminate Path Traversal vulnerabilities. Added `SESSION_LOCK` with exponential backoff on file replacement to prevent Windows `PermissionError` file-locking crashes. Added thread-safe `SESSION_CACHE` in-memory lookup.

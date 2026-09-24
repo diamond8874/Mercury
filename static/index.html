@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Antigravity DataCleaner - AI-Powered Chat & Analytics</title>
+    <title>Mercury DataCleaner - AI-Powered Chat & Analytics</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,7 +22,7 @@
             <div class="logo-area">
                 <div class="logo-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
                 <div class="logo-text">
-                    <h1>Antigravity</h1>
+                    <h1>Mercury</h1>
                     <span>DataCleaner Pro</span>
                 </div>
             </div>
@@ -57,9 +57,25 @@
                     <p id="workspace-subtitle">Provide your raw dataset file and state what model you plan to train.</p>
                 </div>
                 
-                <div class="api-key-status" id="api-status">
-                    <span class="status-indicator warning"></span>
-                    <span class="status-text">Default Key Active</span>
+                <div class="header-actions" style="display: flex; align-items: center; gap: 1rem;">
+                    <div class="api-key-status" id="api-status">
+                        <span class="status-indicator warning"></span>
+                        <span class="status-text">Default Key Active</span>
+                    </div>
+
+                    <!-- User Profile & Authentication Area -->
+                    <div class="user-auth-area" id="user-auth-area">
+                        <div class="user-profile-badge hidden" id="user-profile-badge">
+                            <span class="user-avatar"><i class="fa-solid fa-circle-user"></i></span>
+                            <span class="user-name" id="user-name-display">Guest</span>
+                            <button class="logout-icon-btn" id="logout-btn" title="Sign Out">
+                                <i class="fa-solid fa-right-from-bracket"></i>
+                            </button>
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="open-auth-modal-btn">
+                            <i class="fa-solid fa-right-to-bracket"></i> Sign In
+                        </button>
+                    </div>
                 </div>
             </header>
 
@@ -345,6 +361,14 @@
                     <p class="form-help" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Useful for Ollama or custom API proxies.</p>
                     <input type="text" id="settings-base-url" placeholder="e.g. http://localhost:11434" style="width: 100%; padding: 0.75rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
                 </div>
+
+                <!-- Data Privacy Notice -->
+                <div style="background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.35); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; display: flex; gap: 0.6rem; align-items: flex-start;">
+                    <i class="fa-solid fa-triangle-exclamation" style="color: #f59e0b; margin-top: 2px; flex-shrink: 0;"></i>
+                    <p style="margin: 0; font-size: 0.75rem; color: #fcd34d; line-height: 1.5;">
+                        <strong>Data Notice:</strong> When you click <em>Analyze</em> or send a chat message, your dataset's column names, data types, null counts, and a small sample of values are sent to the selected LLM provider for analysis. No full row data is transmitted. Your API key is stored in session memory only and is cleared when you close the tab.
+                    </p>
+                </div>
             </div>
             
             <div class="modal-footer">
@@ -410,17 +434,84 @@
                 <input type="hidden" id="modal-chart-type">
 
                 <div class="form-group">
-                    <label for="modal-x-col" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.85rem;"><i class="fa-solid fa-font"></i> X-Axis / Category Column:</label>
+                    <label for="modal-x-col" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.85rem;"><i class="fa-solid fa-font"></i> <span id="modal-x-label">X-Axis / Category Column</span>:</label>
                     <select id="modal-x-col" class="form-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(15,23,42,0.8); color: white; border: 1px solid rgba(255,255,255,0.15);"></select>
                 </div>
                 <div class="form-group">
-                    <label for="modal-y-col" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.85rem;"><i class="fa-solid fa-arrow-trend-up"></i> Y-Axis / Metric Column:</label>
+                    <label for="modal-y-col" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.85rem;"><i class="fa-solid fa-arrow-trend-up"></i> <span id="modal-y-label">Y-Axis / Metric Column</span>:</label>
                     <select id="modal-y-col" class="form-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(15,23,42,0.8); color: white; border: 1px solid rgba(255,255,255,0.15);"></select>
                 </div>
             </div>
             <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; padding-top: 10px;">
                 <button class="btn btn-secondary" id="cancel-chart-modal-btn">Cancel</button>
                 <button class="btn btn-primary" id="render-chart-modal-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate Visual</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AUTHENTICATION MODAL (SIGN IN / REGISTER) -->
+    <div class="modal-overlay hidden" id="auth-modal">
+        <div class="glass-card modal-content auth-modal-card">
+            <div class="modal-header auth-modal-header">
+                <div class="auth-brand">
+                    <div class="logo-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                    <div>
+                        <h3 id="auth-modal-title">Welcome to Mercury</h3>
+                        <p class="auth-modal-subtitle" id="auth-modal-subtitle">Sign in to access your sessions and datasets</p>
+                    </div>
+                </div>
+                <button class="btn-icon close-modal-btn hidden" id="close-auth-modal-btn"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <!-- Tab Switcher: Sign In vs Create Account -->
+            <div class="auth-tabs">
+                <button class="auth-tab-btn active" id="auth-tab-login" type="button">
+                    <i class="fa-solid fa-right-to-bracket"></i> Sign In
+                </button>
+                <button class="auth-tab-btn" id="auth-tab-register" type="button">
+                    <i class="fa-solid fa-user-plus"></i> Create Account
+                </button>
+            </div>
+
+            <form id="auth-form" class="auth-form">
+                <!-- Inline Error Alert -->
+                <div class="auth-error-alert hidden" id="auth-error-alert">
+                    <i class="fa-solid fa-circle-exclamation"></i>
+                    <span id="auth-error-text">Invalid credentials</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="auth-username"><i class="fa-solid fa-user"></i> Username</label>
+                    <input type="text" id="auth-username" class="form-input" placeholder="Enter your username" autocomplete="username" required minlength="3">
+                </div>
+
+                <div class="form-group">
+                    <label for="auth-password"><i class="fa-solid fa-lock"></i> Password</label>
+                    <div class="input-password-wrapper" style="position: relative;">
+                        <input type="password" id="auth-password" class="form-input" placeholder="Enter your password" autocomplete="current-password" required minlength="6" style="width: 100%; padding-right: 2.5rem;">
+                        <button type="button" class="btn-icon" id="toggle-auth-password" style="position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer;">
+                            <i class="fa-solid fa-eye"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-group auth-remember-wrapper" id="auth-remember-row">
+                    <label class="remember-checkbox-label">
+                        <input type="checkbox" id="auth-remember" checked>
+                        <span>Keep me signed in (14 days)</span>
+                    </label>
+                </div>
+
+                <div class="modal-footer auth-footer">
+                    <button type="submit" class="btn btn-primary auth-submit-btn" id="auth-submit-btn">
+                        <span id="auth-submit-text">Sign In</span>
+                    </button>
+                </div>
+            </form>
+
+            <div class="auth-toggle-note">
+                <span id="auth-toggle-prompt">Don't have an account?</span>
+                <a href="#" id="auth-toggle-link">Create one now</a>
             </div>
         </div>
     </div>

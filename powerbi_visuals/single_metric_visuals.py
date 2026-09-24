@@ -61,7 +61,8 @@ def render_gauge_chart(df: pd.DataFrame, value_col: str, target: float = None):
     ax = fig.add_subplot(111, polar=True)
     
     # Background arc
-    ax.bar(x=0, height=1, width=np.pi, bottom=1, color='rgba(255,255,255,0.1)', align='edge')
+    ax.bar(x=0, height=1, width=np.pi, bottom=1, color=(1, 1, 1, 0.1), align='edge')
+
     
     # Value arc
     ratio = min(val / target, 1.0)

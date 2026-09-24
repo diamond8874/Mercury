@@ -1,14 +1,23 @@
+"""
+utils/session_manager.py
+------------------------
+Session Manager facade connecting to the persistent SessionRepository
+while maintaining backwards-compatible function signatures, in-memory caching,
+and debug JSON export capability.
+"""
 import os
 import json
 import logging
 import datetime
-import re
-import time
 import threading
+import uuid
 from flask import current_app
 import pandas as pd
 import numpy as np
+
 import config
+from models import init_db as init_models_db
+from repositories.session_repository import get_session_repository
 
 SESSION_LOCK = threading.RLock()
 SESSION_CACHE = {}
@@ -36,26 +45,46 @@ def get_session_folder():
     return config.SESSION_FOLDER
 
 def sanitize_session_id(session_id):
-    """Sanitizes session_id to prevent path traversal vulnerabilities."""
+    """Sanitizes session_id and validates it strictly as a UUID string."""
     if not session_id or not isinstance(session_id, str):
         return None
     clean_id = os.path.basename(session_id).strip()
-    if not re.match(r'^[a-zA-Z0-9_-]+$', clean_id):
+    try:
+        val = uuid.UUID(clean_id)
+        return str(val)
+    except (ValueError, TypeError, AttributeError):
         return None
-    return clean_id
 
 def invalidate_session_cache(session_id):
-    """Removes a session from the in-memory cache when deleted."""
+    """Removes a session from the in-memory cache."""
     clean_id = sanitize_session_id(session_id)
     if clean_id:
         with CACHE_LOCK:
             SESSION_CACHE.pop(clean_id, None)
 
+def export_session_to_json(session_data: dict) -> str:
+    """Exports a session dictionary to a JSON file on disk for debugging and inspections."""
+    if not session_data or 'session_id' not in session_data:
+        return ""
+    clean_id = sanitize_session_id(session_data['session_id'])
+    if not clean_id:
+        return ""
+    folder = get_session_folder()
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"{clean_id}.json")
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(session_data, f, cls=CustomJSONEncoder, indent=2, ensure_ascii=False)
+        return path
+    except Exception as e:
+        logging.warning("Error writing debug session JSON (%s): %s", clean_id, str(e))
+        return ""
+
 def load_session(session_id):
-    """Thread-safe session loader with sanitization and in-memory caching."""
+    """Loads session from the relational SessionRepository with in-memory caching and fallback."""
     clean_id = sanitize_session_id(session_id)
     if not clean_id:
-        logging.warning(f"Invalid or unsafe session_id rejected: {session_id}")
+        logging.warning("Invalid or unsafe session_id rejected: %s", session_id)
         return None
 
     # Check fast in-memory cache first
@@ -63,55 +92,56 @@ def load_session(session_id):
         if clean_id in SESSION_CACHE:
             return json.loads(json.dumps(SESSION_CACHE[clean_id]))
 
+    # Query persistent database repository
+    repo = get_session_repository()
+    try:
+        data = repo.get_by_id(clean_id)
+        if data:
+            with CACHE_LOCK:
+                SESSION_CACHE[clean_id] = data
+            return data
+    except Exception as db_err:
+        logging.warning("Repository load failed (%s), falling back to filesystem: %s", clean_id, str(db_err))
+
+    # Filesystem fallback if DB lookup fails
     path = os.path.join(get_session_folder(), f"{clean_id}.json")
     if os.path.exists(path):
         with SESSION_LOCK:
-            for attempt in range(5):
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        with CACHE_LOCK:
-                            SESSION_CACHE[clean_id] = data
-                        return data
-                except Exception as e:
-                    time.sleep(0.05 * (attempt + 1))
-                    if attempt == 4:
-                        logging.error(f"Error loading session JSON ({clean_id}): {str(e)}")
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    with CACHE_LOCK:
+                        SESSION_CACHE[clean_id] = data
+                    # Sync into database
+                    try:
+                        repo.save(data)
+                    except Exception:
+                        pass
+                    return data
+            except Exception as e:
+                logging.error("Error loading fallback session JSON (%s): %s", clean_id, str(e))
     return None
 
 def save_session(session_data):
-    """Thread-safe session saver with retrying atomic replacement and cache sync."""
+    """Persists session to SessionRepository, in-memory cache, and updates debug JSON export."""
     if not session_data or 'session_id' not in session_data:
         return
 
     session_id = session_data['session_id']
     clean_id = sanitize_session_id(session_id)
     if not clean_id:
-        logging.warning(f"Invalid or unsafe session_id in save_session: {session_id}")
+        logging.warning("Invalid or unsafe session_id in save_session: %s", session_id)
         return
 
-    # Update in-memory cache
     with CACHE_LOCK:
         SESSION_CACHE[clean_id] = session_data
 
-    folder = get_session_folder()
-    path = os.path.join(folder, f"{clean_id}.json")
-    tmp_path = os.path.join(folder, f"{clean_id}.tmp")
+    # Save to persistent database repository
+    repo = get_session_repository()
+    try:
+        repo.save(session_data)
+    except Exception as db_err:
+        logging.error("Repository save failed (%s): %s", clean_id, str(db_err))
 
-    with SESSION_LOCK:
-        try:
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(session_data, f, cls=CustomJSONEncoder, indent=2, ensure_ascii=False)
-            
-            # Retry loop for Windows file locking PermissionError
-            for attempt in range(5):
-                try:
-                    os.replace(tmp_path, path)
-                    break
-                except PermissionError:
-                    time.sleep(0.05 * (attempt + 1))
-                    if attempt == 4:
-                        raise
-        except Exception as e:
-            logging.error(f"Error saving session JSON ({clean_id}): {str(e)}")
-
+    # Keep a JSON export for debugging and compatibility
+    export_session_to_json(session_data)

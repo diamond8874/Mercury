@@ -1,6 +1,9 @@
 // Application State
+// NOTE: apiKey is stored in sessionStorage only (cleared when tab closes) — never localStorage.
 const appState = {
-    apiKey: localStorage.getItem('nvidia_api_key') || '',
+    user: null,
+    authMode: 'login',
+    apiKey: sessionStorage.getItem('llm_api_key') || '',
     provider: localStorage.getItem('llm_provider') || '',
     model: localStorage.getItem('llm_model') || '',
     baseUrl: localStorage.getItem('llm_base_url') || '',
@@ -9,6 +12,16 @@ const appState = {
     sessionsHistory: [],
     chartInstances: []
 };
+
+/** Escape a string for safe insertion into innerHTML. */
+function escapeHTML(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 // DOM Elements
 const els = {
@@ -23,6 +36,29 @@ const els = {
     settingsModel: document.getElementById('settings-model'),
     settingsBaseUrl: document.getElementById('settings-base-url'),
     toggleKeyVisibility: document.getElementById('toggle-key-visibility'),
+
+    // Authentication Elements
+    authModal: document.getElementById('auth-modal'),
+    closeAuthModalBtn: document.getElementById('close-auth-modal-btn'),
+    openAuthModalBtn: document.getElementById('open-auth-modal-btn'),
+    userProfileBadge: document.getElementById('user-profile-badge'),
+    userNameDisplay: document.getElementById('user-name-display'),
+    logoutBtn: document.getElementById('logout-btn'),
+    authForm: document.getElementById('auth-form'),
+    authUsername: document.getElementById('auth-username'),
+    authPassword: document.getElementById('auth-password'),
+    authRemember: document.getElementById('auth-remember'),
+    authTabLogin: document.getElementById('auth-tab-login'),
+    authTabRegister: document.getElementById('auth-tab-register'),
+    authErrorAlert: document.getElementById('auth-error-alert'),
+    authErrorText: document.getElementById('auth-error-text'),
+    authSubmitBtn: document.getElementById('auth-submit-btn'),
+    authSubmitText: document.getElementById('auth-submit-text'),
+    authModalTitle: document.getElementById('auth-modal-title'),
+    authModalSubtitle: document.getElementById('auth-modal-subtitle'),
+    authTogglePrompt: document.getElementById('auth-toggle-prompt'),
+    authToggleLink: document.getElementById('auth-toggle-link'),
+    toggleAuthPassword: document.getElementById('toggle-auth-password'),
     
     // Sidebar History
     sessionsList: document.getElementById('sessions-list'),
@@ -119,8 +155,9 @@ document.addEventListener('DOMContentLoaded', () => {
     els.processDataBtn.addEventListener('click', executePandasProcess);
     els.generatePdfBtn.addEventListener('click', compilePdfDiagnosticsReport);
 
-    // Load past session history lists
-    fetchSessionsHistory();
+    // Initialize Authentication System and check existing login state
+    initAuthSystem();
+    checkAuthStatus();
 });
 
 // Helper - Loader displays
@@ -214,7 +251,9 @@ function initSettingsModal() {
 
         localStorage.setItem('llm_provider', appState.provider);
         localStorage.setItem('llm_model', appState.model);
-        localStorage.setItem('nvidia_api_key', appState.apiKey);
+        // API key stored in sessionStorage only — cleared automatically when tab closes
+        sessionStorage.setItem('llm_api_key', appState.apiKey);
+        localStorage.removeItem('nvidia_api_key'); // remove old persistent key if present
         localStorage.setItem('llm_base_url', appState.baseUrl);
 
         updateApiStatus();
@@ -230,12 +269,234 @@ function initSettingsModal() {
     });
 }
 
+// 1B. AUTHENTICATION LIFECYCLE & HANDLERS
+function initAuthSystem() {
+    if (!els.authModal) return;
+
+    // Switch to Login tab
+    if (els.authTabLogin) {
+        els.authTabLogin.addEventListener('click', () => setAuthMode('login'));
+    }
+
+    // Switch to Register tab
+    if (els.authTabRegister) {
+        els.authTabRegister.addEventListener('click', () => setAuthMode('register'));
+    }
+
+    // Switch via bottom helper link
+    if (els.authToggleLink) {
+        els.authToggleLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            setAuthMode(appState.authMode === 'login' ? 'register' : 'login');
+        });
+    }
+
+    // Password visibility toggle
+    if (els.toggleAuthPassword && els.authPassword) {
+        els.toggleAuthPassword.addEventListener('click', () => {
+            const isPw = els.authPassword.getAttribute('type') === 'password';
+            els.authPassword.setAttribute('type', isPw ? 'text' : 'password');
+            const icon = els.toggleAuthPassword.querySelector('i');
+            if (icon) {
+                icon.classList.toggle('fa-eye', !isPw);
+                icon.classList.toggle('fa-eye-slash', isPw);
+            }
+        });
+    }
+
+    // Modal close button
+    if (els.closeAuthModalBtn) {
+        els.closeAuthModalBtn.addEventListener('click', hideAuthModal);
+    }
+
+    // Header sign in button
+    if (els.openAuthModalBtn) {
+        els.openAuthModalBtn.addEventListener('click', () => showAuthModal(true));
+    }
+
+    // Header logout button
+    if (els.logoutBtn) {
+        els.logoutBtn.addEventListener('click', handleLogout);
+    }
+
+    // Form submit
+    if (els.authForm) {
+        els.authForm.addEventListener('submit', handleAuthSubmit);
+    }
+}
+
+function setAuthMode(mode) {
+    appState.authMode = mode;
+    hideAuthError();
+
+    if (mode === 'login') {
+        if (els.authTabLogin) els.authTabLogin.classList.add('active');
+        if (els.authTabRegister) els.authTabRegister.classList.remove('active');
+        if (els.authModalTitle) els.authModalTitle.textContent = "Welcome to Mercury";
+        if (els.authModalSubtitle) els.authModalSubtitle.textContent = "Sign in to access your sessions and datasets";
+        if (els.authSubmitText) els.authSubmitText.textContent = "Sign In";
+        if (els.authTogglePrompt) els.authTogglePrompt.textContent = "Don't have an account?";
+        if (els.authToggleLink) els.authToggleLink.textContent = "Create one now";
+        const remRow = document.getElementById('auth-remember-row');
+        if (remRow) remRow.style.display = 'block';
+    } else {
+        if (els.authTabLogin) els.authTabLogin.classList.remove('active');
+        if (els.authTabRegister) els.authTabRegister.classList.add('active');
+        if (els.authModalTitle) els.authModalTitle.textContent = "Create an Account";
+        if (els.authModalSubtitle) els.authModalSubtitle.textContent = "Set up your credentials to manage private datasets";
+        if (els.authSubmitText) els.authSubmitText.textContent = "Create Account";
+        if (els.authTogglePrompt) els.authTogglePrompt.textContent = "Already have an account?";
+        if (els.authToggleLink) els.authToggleLink.textContent = "Sign in here";
+        const remRow = document.getElementById('auth-remember-row');
+        if (remRow) remRow.style.display = 'none';
+    }
+}
+
+function showAuthError(msg) {
+    if (els.authErrorAlert && els.authErrorText) {
+        els.authErrorText.textContent = msg;
+        els.authErrorAlert.classList.remove('hidden');
+    }
+}
+
+function hideAuthError() {
+    if (els.authErrorAlert) {
+        els.authErrorAlert.classList.add('hidden');
+    }
+}
+
+function showAuthModal(closable = false) {
+    if (!els.authModal) return;
+    if (els.closeAuthModalBtn) {
+        els.closeAuthModalBtn.classList.toggle('hidden', !closable);
+    }
+    hideAuthError();
+    els.authModal.classList.remove('hidden');
+    if (els.authUsername) setTimeout(() => els.authUsername.focus(), 100);
+}
+
+function hideAuthModal() {
+    if (els.authModal) {
+        els.authModal.classList.add('hidden');
+    }
+}
+
+async function checkAuthStatus() {
+    try {
+        const res = await fetch('/api/auth/me');
+        const data = await res.json();
+
+        if (res.ok && data.authenticated && data.user) {
+            appState.user = data.user;
+            if (els.userNameDisplay) els.userNameDisplay.textContent = data.user.username;
+            if (els.userProfileBadge) els.userProfileBadge.classList.remove('hidden');
+            if (els.openAuthModalBtn) els.openAuthModalBtn.classList.add('hidden');
+            hideAuthModal();
+            fetchSessionsHistory();
+        } else {
+            appState.user = null;
+            if (els.userProfileBadge) els.userProfileBadge.classList.add('hidden');
+            if (els.openAuthModalBtn) els.openAuthModalBtn.classList.remove('hidden');
+            showAuthModal(false);
+        }
+    } catch (err) {
+        console.error("Auth status verification error:", err);
+        showAuthModal(false);
+    }
+}
+
+async function handleAuthSubmit(e) {
+    e.preventDefault();
+    hideAuthError();
+
+    const username = els.authUsername ? els.authUsername.value.trim() : '';
+    const password = els.authPassword ? els.authPassword.value : '';
+    const remember = els.authRemember ? els.authRemember.checked : true;
+
+    if (!username || !password) {
+        showAuthError("Please fill in both username and password.");
+        return;
+    }
+
+    const endpoint = appState.authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
+    const payload = appState.authMode === 'login'
+        ? { username, password, remember }
+        : { username, password };
+
+    if (els.authSubmitBtn) {
+        els.authSubmitBtn.disabled = true;
+        els.authSubmitBtn.style.opacity = '0.7';
+    }
+
+    try {
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            showAuthError(data.error || "Authentication failed. Please check your credentials.");
+            return;
+        }
+
+        // Authentication successful
+        appState.user = data.user;
+        if (els.userNameDisplay) els.userNameDisplay.textContent = data.user.username;
+        if (els.userProfileBadge) els.userProfileBadge.classList.remove('hidden');
+        if (els.openAuthModalBtn) els.openAuthModalBtn.classList.add('hidden');
+
+        if (els.authForm) els.authForm.reset();
+        hideAuthModal();
+        fetchSessionsHistory();
+
+    } catch (err) {
+        showAuthError("Network error: Unable to contact the server.");
+    } finally {
+        if (els.authSubmitBtn) {
+            els.authSubmitBtn.disabled = false;
+            els.authSubmitBtn.style.opacity = '';
+        }
+    }
+}
+
+async function handleLogout() {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+        console.error("Logout error:", err);
+    }
+
+    appState.user = null;
+    appState.activeSessionId = null;
+    appState.sessionData = null;
+    appState.sessionsHistory = [];
+
+    if (els.userProfileBadge) els.userProfileBadge.classList.add('hidden');
+    if (els.openAuthModalBtn) els.openAuthModalBtn.classList.remove('hidden');
+
+    startNewAnalysis();
+    renderSessionsList();
+    setAuthMode('login');
+    showAuthModal(false);
+}
+
 // 2. SIDEBAR SESSIONS HISTORY lifecycles
 async function fetchSessionsHistory() {
     try {
         const response = await fetch('/api/sessions');
+        if (response.status === 401) {
+            appState.user = null;
+            if (els.userProfileBadge) els.userProfileBadge.classList.add('hidden');
+            if (els.openAuthModalBtn) els.openAuthModalBtn.classList.remove('hidden');
+            showAuthModal(false);
+            showAuthError("Session expired. Please sign in to continue.");
+            return;
+        }
         const data = await response.json();
-        appState.sessionsHistory = data;
+        appState.sessionsHistory = Array.isArray(data) ? data : [];
         renderSessionsList();
     } catch (err) {
         console.error("Error fetching sessions list history:", err);
@@ -257,16 +518,31 @@ function renderSessionsList() {
         
         const dateStr = session.created_at ? new Date(session.created_at).toLocaleDateString() : '';
         const goalStr = session.goal || 'Goal not set';
-        
-        item.innerHTML = `
-            <div class="session-info">
-                <div class="session-name" title="${session.name}">${session.name}</div>
-                <div class="session-goal" title="${goalStr}">${dateStr} - ${goalStr}</div>
-            </div>
-            <button class="delete-session-btn" title="Delete Session">
-                <i class="fa-solid fa-trash-can"></i>
-            </button>
-        `;
+
+        // Build session item with textContent to prevent XSS from user-entered goal/name
+        const infoDiv = document.createElement('div');
+        infoDiv.className = 'session-info';
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'session-name';
+        nameDiv.title = session.name;
+        nameDiv.textContent = session.name;
+
+        const goalDiv = document.createElement('div');
+        goalDiv.className = 'session-goal';
+        goalDiv.title = goalStr;
+        goalDiv.textContent = `${dateStr} - ${goalStr}`;
+
+        infoDiv.appendChild(nameDiv);
+        infoDiv.appendChild(goalDiv);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'delete-session-btn';
+        delBtn.title = 'Delete Session';
+        delBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>'; // static icon only
+
+        item.appendChild(infoDiv);
+        item.appendChild(delBtn);
         
         // Select session event
         item.addEventListener('click', (e) => {
@@ -414,9 +690,16 @@ async function uploadRawDatasetFile(file) {
             method: 'POST',
             body: formData
         });
-        
+
+        if (response.status === 401) {
+            hideLoader();
+            showAuthModal(false);
+            showAuthError("Your session has expired. Please sign in to upload files.");
+            return;
+        }
+
         const data = await response.json();
-        
+
         if (!response.ok) {
             throw new Error(data.error || 'Upload failed');
         }
@@ -535,17 +818,41 @@ function renderLoadedSessionUI() {
     
     // Draw schema recomendations checklist
     renderSchemaActionsGrid();
+
+    // Render Preview Table if preview data exists
+    const previewToRender = (s.bg_result && s.bg_result.preview) ? s.bg_result.preview : s.preview;
+    if (previewToRender && previewToRender.length > 0) {
+        renderTablePreview(previewToRender);
+    }
+
+    // Render Charts if available
+    const chartsToRender = (s.bg_result && s.bg_result.charts) ? s.bg_result.charts : s.charts;
+    if (chartsToRender && chartsToRender.length > 0) {
+        appState.chartInstances.forEach(c => c.destroy());
+        appState.chartInstances = [];
+        renderCharts(chartsToRender);
+    }
     
-    // If cleaned_filename exists (already processed)
-    if (s.cleaned_filename) {
+    // If cleaned_filename exists (already processed) or bg_result exists
+    if (s.cleaned_filename || (s.bg_result && s.bg_result.preview)) {
         enableTabs(true);
         // Stats
-        els.statFinalRows.textContent = s.row_count; // dummy, we'll fetch clean stats if available
-        els.statFinalCols.textContent = Object.keys(s.column_actions).length;
+        const stats = s.bg_result?.stats;
+        if (stats) {
+            els.statFinalRows.textContent = stats.final_rows;
+            els.statInitialRows.textContent = `(Original: ${stats.initial_rows})`;
+            els.statFinalCols.textContent = stats.final_cols;
+            els.statDroppedCols.textContent = `(Dropped: ${stats.dropped_columns ? stats.dropped_columns.length : 0})`;
+        } else {
+            els.statFinalRows.textContent = s.row_count;
+            els.statFinalCols.textContent = s.column_actions ? Object.keys(s.column_actions).length : s.col_count;
+        }
         
         // Build Excel Link
-        els.downloadBtn.setAttribute('href', `/api/download/${s.cleaned_filename}`);
-        els.downloadBtn.classList.remove('hidden');
+        if (s.cleaned_filename) {
+            els.downloadBtn.setAttribute('href', `/api/download/${s.cleaned_filename}`);
+            els.downloadBtn.classList.remove('hidden');
+        }
         
         // PDF configuration
         if (s.pdf_filename) {
@@ -592,7 +899,8 @@ function appendChatBubbleUI(role, content, animate = true) {
     meta.textContent = role === 'user' ? 'You' : 'AI Assistant';
     
     const body = document.createElement('div');
-    body.innerHTML = content; // Allows links/HTML rendering
+    // Use renderChatMarkdown which HTML-escapes before re-adding safe bold/em/code/br
+    body.innerHTML = renderChatMarkdown(content);
     
     bubble.appendChild(meta);
     bubble.appendChild(body);
@@ -818,41 +1126,50 @@ function renderSchemaActionsGrid() {
         card.className = `column-card ${rec.action}-status`;
         card.id = `col-card-${btoa(col.name).replace(/=/g, '')}`;
         
-        const sampleTags = col.sample_values.map(val => `<span class="sample-tag" title="${val}">${val}</span>`).join('');
-        
+        // Build schema card safely with textContent for all user/dataset/LLM-sourced strings
         card.innerHTML = `
             <div class="col-card-header">
                 <div class="col-name-wrapper">
-                    <div class="col-name" title="${col.name}">${col.name}</div>
+                    <div class="col-name" title="${escapeHTML(col.name)}">${escapeHTML(col.name)}</div>
                     <div class="col-meta">
-                        <span>${col.type}</span>
-                        <span>${col.null_count} nulls</span>
+                        <span>${escapeHTML(col.type)}</span>
+                        <span>${escapeHTML(col.null_count)} nulls</span>
                     </div>
                 </div>
-                
                 <div class="col-selector-group">
                     <button class="action-selector ${rec.action === 'keep' ? 'active' : ''}" data-action="keep">Keep</button>
                     <button class="action-selector ${rec.action === 'transform' ? 'active' : ''}" data-action="transform">Trans</button>
                     <button class="action-selector ${rec.action === 'drop' ? 'active' : ''}" data-action="drop">Drop</button>
                 </div>
             </div>
-            
             <div class="col-card-body">
-                <div class="ai-reasoning">
-                    <p>${rec.reason}</p>
-                </div>
-                
+                <div class="ai-reasoning"><p>${escapeHTML(rec.reason)}</p></div>
                 <div class="transformation-editor ${rec.action === 'transform' ? '' : 'hidden'}">
                     <label>Transformation Logic:</label>
-                    <input type="text" class="transform-input" value="${rec.transformation || ''}" placeholder="e.g. Impute missing with median">
+                    <input type="text" class="transform-input" value="${escapeHTML(rec.transformation || '')}" placeholder="e.g. Impute missing with median">
                 </div>
-                
                 <div class="col-samples">
                     <span class="samples-label">Samples:</span>
-                    <div class="samples-tags">${sampleTags || '<span class="text-muted font-size-xs">No data</span>'}</div>
+                    <div class="samples-tags" id="samples-${escapeHTML(col.name)}"></div>
                 </div>
             </div>
         `;
+        // Build sample tags safely with textContent
+        const samplesContainer = card.querySelector(`#samples-${escapeHTML(col.name)}`);
+        if (col.sample_values && col.sample_values.length > 0) {
+            col.sample_values.forEach(val => {
+                const tag = document.createElement('span');
+                tag.className = 'sample-tag';
+                tag.title = String(val);
+                tag.textContent = String(val);
+                samplesContainer.appendChild(tag);
+            });
+        } else {
+            const noData = document.createElement('span');
+            noData.className = 'text-muted font-size-xs';
+            noData.textContent = 'No data';
+            samplesContainer.appendChild(noData);
+        }
         
         // Manual override clicks
         const buttons = card.querySelectorAll('.action-selector');
@@ -1074,15 +1391,23 @@ function renderCharts(chartsData) {
         card.className = 'glass-card chart-card';
         
         const canvasId = `chart-canvas-${index}`;
-        card.innerHTML = `
-            <div class="chart-header">
-                <h4>${chart.title}</h4>
-                <p title="${chart.description}">${chart.description}</p>
-            </div>
-            <div class="chart-wrapper">
-                <canvas id="${canvasId}"></canvas>
-            </div>
-        `;
+        // Build chart card safely
+        const chartHeader = document.createElement('div');
+        chartHeader.className = 'chart-header';
+        const h4 = document.createElement('h4');
+        h4.textContent = chart.title;
+        const desc = document.createElement('p');
+        desc.title = chart.description;
+        desc.textContent = chart.description;
+        chartHeader.appendChild(h4);
+        chartHeader.appendChild(desc);
+        const chartWrapper = document.createElement('div');
+        chartWrapper.className = 'chart-wrapper';
+        const canvas = document.createElement('canvas');
+        canvas.id = canvasId;
+        chartWrapper.appendChild(canvas);
+        card.appendChild(chartHeader);
+        card.appendChild(chartWrapper);
         grid.appendChild(card);
         
         try {
@@ -1383,14 +1708,16 @@ function initPowerBIBuilder() {
     const renderModalBtn = document.getElementById('render-chart-modal-btn');
     const modalXCol = document.getElementById('modal-x-col');
     const modalYCol = document.getElementById('modal-y-col');
+    const modalXLabel = document.getElementById('modal-x-label');
+    const modalYLabel = document.getElementById('modal-y-label');
     const modalCategoryInput = document.getElementById('modal-chart-category');
     const modalTypeInput = document.getElementById('modal-chart-type');
     const modalTitleSpan = document.getElementById('modal-chart-title');
 
     if(!aiBtn) return; // fail safe
 
-    // Function to populate column dropdowns in modal
-    const populateColumnDropdowns = () => {
+    // Function to populate column dropdowns in modal with smart contextual labels & defaults
+    const populateColumnDropdowns = (category, type) => {
         if (!appState.sessionData || !appState.sessionData.columns) return;
         modalXCol.innerHTML = '';
         modalYCol.innerHTML = '';
@@ -1407,12 +1734,27 @@ function initPowerBIBuilder() {
             modalYCol.appendChild(optY);
         });
 
-        // Smart default: pick first categorical for X, first numeric for Y
-        const numCols = appState.sessionData.columns.filter(c => c.type.includes('int') || c.type.includes('float'));
-        const catCols = appState.sessionData.columns.filter(c => !numCols.includes(c));
+        // Context-aware labels
+        if (type === 'bubble_map' || category === 'geo') {
+            if (modalXLabel) modalXLabel.textContent = 'Latitude Column';
+            if (modalYLabel) modalYLabel.textContent = 'Longitude Column';
 
-        if (catCols.length > 0) modalXCol.value = catCols[0].name;
-        if (numCols.length > 0) modalYCol.value = numCols[0].name;
+            // Smart detection of coordinate columns
+            const latCol = appState.sessionData.columns.find(c => /lat|latitude/i.test(c.name));
+            const lonCol = appState.sessionData.columns.find(c => /lon|lng|longitude/i.test(c.name));
+            if (latCol) modalXCol.value = latCol.name;
+            if (lonCol) modalYCol.value = lonCol.name;
+        } else {
+            if (modalXLabel) modalXLabel.textContent = 'X-Axis / Category Column';
+            if (modalYLabel) modalYLabel.textContent = 'Y-Axis / Metric Column';
+
+            // Smart default: pick first categorical for X, first numeric for Y
+            const numCols = appState.sessionData.columns.filter(c => c.type.includes('int') || c.type.includes('float'));
+            const catCols = appState.sessionData.columns.filter(c => !numCols.includes(c));
+
+            if (catCols.length > 0) modalXCol.value = catCols[0].name;
+            if (numCols.length > 0) modalYCol.value = numCols[0].name;
+        }
     };
 
     // Quick Visual Picker Gallery Buttons -> Opens Modal
@@ -1426,7 +1768,7 @@ function initPowerBIBuilder() {
             modalTypeInput.value = type;
             modalTitleSpan.textContent = `Configure ${type.toUpperCase().replace('_', ' ')} Visual`;
 
-            populateColumnDropdowns();
+            populateColumnDropdowns(category, type);
             configModal.classList.remove('hidden');
         });
     });
@@ -1486,14 +1828,23 @@ function initPowerBIBuilder() {
 
     // Helper: Execute custom_chart API and display chart with "Add to Report" pinning
     async function renderCustomVisual(params) {
-        canvas.innerHTML = `
-            <div class="progress-container" style="width: 80%; max-width: 400px; text-align: center; margin: auto; padding-top: 15%;">
-                <h4 style="margin-bottom: 12px; color: var(--text-muted); font-weight: normal;"><i class="fa-solid fa-spinner fa-spin"></i> Rendering ${params.chart_type} visual...</h4>
-                <div class="progress-bar-bg" style="width: 100%; background: rgba(255,255,255,0.1); border-radius: 10px; height: 8px; overflow: hidden;">
-                    <div style="width: 80%; background: var(--primary); height: 100%; border-radius: 10px;"></div>
-                </div>
-            </div>
-        `;
+        // Build loading spinner safely (no user content in spinner)
+        canvas.innerHTML = '';
+        const spinner = document.createElement('div');
+        spinner.className = 'progress-container';
+        spinner.style.cssText = 'width:80%;max-width:400px;text-align:center;margin:auto;padding-top:15%';
+        const spinH = document.createElement('h4');
+        spinH.style.cssText = 'margin-bottom:12px;color:var(--text-muted);font-weight:normal';
+        spinH.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> '; // icon only
+        spinH.appendChild(document.createTextNode(`Rendering ${params.chart_type} visual...`));
+        const barBg = document.createElement('div');
+        barBg.style.cssText = 'width:100%;background:rgba(255,255,255,0.1);border-radius:10px;height:8px;overflow:hidden';
+        const barFill = document.createElement('div');
+        barFill.style.cssText = 'width:80%;background:var(--primary);height:100%;border-radius:10px';
+        barBg.appendChild(barFill);
+        spinner.appendChild(spinH);
+        spinner.appendChild(barBg);
+        canvas.appendChild(spinner);
 
         try {
             const res = await fetch(`/api/sessions/${appState.activeSessionId}/custom_chart`, {
@@ -1524,7 +1875,7 @@ function initPowerBIBuilder() {
             card.innerHTML = headerHTML;
 
             const contentDiv = document.createElement('div');
-            contentDiv.style.cssText = 'flex-grow: 1; min-height: 320px; display: flex; justify-content: center; align-items: center;';
+            contentDiv.style.cssText = 'flex-grow: 1; min-height: 320px; width: 100%; display: flex; justify-content: center; align-items: center;';
 
             if (data.chart.type === 'image') {
                 const img = document.createElement('img');
@@ -1579,12 +1930,16 @@ function initPowerBIBuilder() {
             }
 
         } catch (err) {
-            canvas.innerHTML = `
-                <div class="bi-placeholder" style="color: #ef4444;">
-                    <i class="fa-solid fa-circle-exclamation" style="font-size: 2.5rem; margin-bottom: 1rem;"></i>
-                    <p>${err.message}</p>
-                </div>
-            `;
+            // Build error state safely — err.message set via textContent only
+            canvas.innerHTML = '';
+            const errDiv = document.createElement('div');
+            errDiv.className = 'bi-placeholder';
+            errDiv.style.color = '#ef4444';
+            errDiv.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="font-size:2.5rem;margin-bottom:1rem"></i>'; // icon only
+            const errMsg = document.createElement('p');
+            errMsg.textContent = err.message;
+            errDiv.appendChild(errMsg);
+            canvas.appendChild(errDiv);
         }
     }
 }

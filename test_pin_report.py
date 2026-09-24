@@ -8,9 +8,9 @@ if hasattr(sys.stdout, "reconfigure"):
 
 BASE_URL = "http://localhost:5000"
 
-def test_pin_and_report_flow():
+def run_pin_and_report_flow():
     print("1. Uploading dataset...")
-    test_file = "test_dirty_data.xlsx"
+    test_file = os.path.join(os.path.dirname(__file__), "test_dirty_data.xlsx")
     if not os.path.exists(test_file):
         print(f"Error: {test_file} not found.")
         return
@@ -74,4 +74,4 @@ def test_pin_and_report_flow():
     print("\n✅ PIN & REPORT TEST PASSED SUCCESSFULLY!")
 
 if __name__ == "__main__":
-    test_pin_and_report_flow()
+    run_pin_and_report_flow()

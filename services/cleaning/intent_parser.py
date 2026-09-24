@@ -280,6 +280,10 @@ def _detect_operation(step_lower: str) -> str:
     if re.search(r'\b(?:keep|filter)\s+rows?\s+where\b', step_lower, re.IGNORECASE):
         return "filter_rows"
 
+    # ── Round values (explicit, must be before convert_datatype & value mapping) ────
+    if re.search(r'\bround(?:\s+off)?\b', step_lower, re.IGNORECASE):
+        return "round_values"
+
     # ── Datatype conversion ────────────────────────────────────────────────────
     dt_match = re.search(
         r'\b(?:convert|cast|change\s+type|change\s+dtype|type|as|to|make|turn\s+into|set\s+type)?\s*'
@@ -317,10 +321,6 @@ def _detect_operation(step_lower: str) -> str:
     if re.search(r'\b(?:remove\s+all\s+non-\w+|regex\s+replace|replace\s+regex)\b',
                  step_lower, re.IGNORECASE):
         return "replace_value_regex"
-
-    # ── Round values (explicit, must be before normalize) ────────────────────
-    if re.search(r'\bround\s+to\s+nearest\b|\bround\s+to\s+\d', step_lower, re.IGNORECASE):
-        return "round_values"
 
     # ── Use operation registry for remaining ops ───────────────────────────────
     matches = find_operation_by_keyword(step_lower)
@@ -643,8 +643,13 @@ def build_cleaning_plan(col: str, trans: str, df, target_column: str = None) -> 
             message = f"Fill missing '{step_col}' with '{parameters.get('fill_value')}'."
 
         elif operation == "round_values":
-            m = re.search(r'round\s+to\s+(\d+)', step_str, re.IGNORECASE)
-            parameters["decimals"] = int(m.group(1)) if m else 0
+            m = re.search(r'round(?:\s+off)?\s*(?:to|by)?\s*(\d+)', step_str, re.IGNORECASE)
+            if m:
+                parameters["decimals"] = int(m.group(1))
+            elif re.search(r'\b(whole\s+number|integer|int|0\s+decimal|nearest)\b', step_str, re.IGNORECASE):
+                parameters["decimals"] = 0
+            else:
+                parameters["decimals"] = 0
             message = f"Round '{step_col}' to {parameters['decimals']} decimal places."
 
         elif operation == "derived_math":

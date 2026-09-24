@@ -8,3 +8,7 @@ fonts
 .env
 test_output_data/
 *.pyc
+*.db
+*.db-shm
+*.db-wal
+data/

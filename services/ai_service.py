@@ -1,6 +1,7 @@
 import os
 import litellm
 import logging
+from utils.url_validator import validate_base_url
 
 class UnifiedLLMClient:
     """
@@ -8,6 +9,12 @@ class UnifiedLLMClient:
     for the standard OpenAI client, utilizing LiteLLM as its execution engine.
     """
     def __init__(self, api_key=None, provider=None, model=None, base_url=None):
+        if base_url:
+            is_debug = os.environ.get("DEBUG", "false").lower() in ("true", "1", "t")
+            valid, err = validate_base_url(base_url, is_debug=is_debug)
+            if not valid:
+                raise ValueError(f"Prohibited or invalid base_url: {err}")
+
         self.api_key = api_key
         self.provider = provider
         self.model = model
@@ -28,12 +35,13 @@ class UnifiedLLMClient:
 
                 logging.info(f"UnifiedLLMClient routing to provider: {provider}, model: {model_name}")
 
-                # Prepare standard parameters for LiteLLM
+                # Prepare standard parameters for LiteLLM with timeouts and retry bounds
                 litellm_args = {
                     "model": model_name,
                     "messages": messages,
                     "stream": stream,
-                    "timeout": 45.0  # 45s timeout to allow large 70B models to complete response
+                    "timeout": 45.0,  # 45s timeout to allow large models to complete response
+                    "num_retries": 2   # Maximum retry limit on transient network failures
                 }
                 if temperature is not None:
                     litellm_args["temperature"] = temperature
@@ -44,6 +52,10 @@ class UnifiedLLMClient:
                 if api_key:
                     litellm_args["api_key"] = api_key
                 if base_url:
+                    is_debug = os.environ.get("DEBUG", "false").lower() in ("true", "1", "t")
+                    valid, err = validate_base_url(base_url, is_debug=is_debug)
+                    if not valid:
+                        raise ValueError(f"Prohibited or invalid base_url: {err}")
                     litellm_args["api_base"] = base_url
 
                 # Litellm doesn't support seed for all models; only pass for OpenAI/Nvidia/compatible
@@ -60,28 +72,53 @@ class UnifiedLLMClient:
         """
         Determines the correct provider, model identifier, API key, and base URL.
         """
+        # Sanitize self.model for stale/deprecated UI localStorage values first
+        _deprecated_nvidia_tokens = [
+            "llama-3.3-70b", "llama-3.1-70b", "llama-3.3-70b-instruct",
+            "llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct",
+            "meta/llama-3.1-70b-instruct", "nemotron", "llama-3.1-nemotron",
+            "nvidia/llama", "glm-5.2"
+        ]
+        _groq_fallback = "groq/openai/gpt-oss-120b"
+        for _tok in _deprecated_nvidia_tokens:
+            if self.model and _tok in (self.model or "").lower():
+                self.model = _groq_fallback
+                self.provider = "groq"
+                break
+        # Also redirect if provider is nvidia but no valid NVIDIA key is set
+        if (self.provider or "").lower() == "nvidia" and not (self.api_key or "").startswith("nvapi-"):
+            if os.environ.get("GROQ_API_KEY"):
+                self.provider = "groq"
+                if not (self.model or "").startswith("groq/"):
+                    self.model = _groq_fallback
+
         # Resolve target model name
         model_name = requested_model or self.model or os.environ.get("LLM_MODEL")
         
         # If no model is explicitly requested, auto-select based on available API keys
         if not model_name or model_name.strip() == "":
-            if self.api_key or os.environ.get("NVIDIA_API_KEY"):
-                model_name = "nvidia/llama-3.1-nemotron-70b-instruct"
+            if os.environ.get("GROQ_API_KEY"):
+                model_name = "groq/openai/gpt-oss-120b"
             elif os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
                 model_name = "gemini-2.5-flash"
-            elif os.environ.get("GROQ_API_KEY"):
-                model_name = "llama-3.1-70b-versatile"
             elif os.environ.get("OPENAI_API_KEY"):
                 model_name = "gpt-4o-mini"
             elif os.environ.get("ANTHROPIC_API_KEY"):
                 model_name = "claude-3-5-haiku-20241022"
             else:
-                model_name = "nvidia/llama-3.1-nemotron-70b-instruct"
+                model_name = "groq/openai/gpt-oss-120b"
 
         # Replace deprecated/end-of-life models globally
-        deprecated_tokens = ["llama-3.3-70b", "llama-3.1-70b", "llama-3.3-70b-instruct", "llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct"]
-        if any(tok in model_name for tok in deprecated_tokens):
-            model_name = "nvidia/llama-3.1-nemotron-70b-instruct"
+        deprecated_groq = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it", "llama-3.3-70b-specdec"]
+        if any(tok in model_name for tok in deprecated_groq):
+            model_name = "groq/openai/gpt-oss-120b"
+
+        deprecated_tokens = ["llama-3.3-70b", "llama-3.1-70b", "llama-3.3-70b-instruct", "llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct", "nemotron"]
+        if any(tok in model_name for tok in deprecated_tokens) and not model_name.startswith("groq/"):
+            if os.environ.get("GROQ_API_KEY"):
+                model_name = "groq/openai/gpt-oss-120b"
+            else:
+                model_name = "groq/openai/gpt-oss-120b"
 
         model_lower = model_name.lower()
 

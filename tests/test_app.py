@@ -1,45 +1,10 @@
-import os
-import json
 import io
 import pytest
 import pandas as pd
-from app import app
-from utils.session_manager import load_session
+from services.ai_service import UnifiedLLMClient
 
-@pytest.fixture
-def client():
-    app.config['TESTING'] = True
-    # Use temporary folders for testing to avoid polluting real folders
-    app.config['UPLOAD_FOLDER'] = os.path.join(os.getcwd(), 'test_uploads')
-    app.config['OUTPUT_FOLDER'] = os.path.join(os.getcwd(), 'test_output_data')
-    app.config['SESSION_FOLDER'] = os.path.join(os.getcwd(), 'test_sessions')
-
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
-    os.makedirs(app.config['SESSION_FOLDER'], exist_ok=True)
-
-    # Patch config variables
-    import config
-    orig_upload = config.UPLOAD_FOLDER
-    orig_output = config.OUTPUT_FOLDER
-    orig_session = config.SESSION_FOLDER
-
-    config.UPLOAD_FOLDER = app.config['UPLOAD_FOLDER']
-    config.OUTPUT_FOLDER = app.config['OUTPUT_FOLDER']
-    config.SESSION_FOLDER = app.config['SESSION_FOLDER']
-
-    with app.test_client() as client:
-        yield client
-
-    # Clean up test directories
-    import shutil
-    shutil.rmtree(app.config['UPLOAD_FOLDER'], ignore_errors=True)
-    shutil.rmtree(app.config['OUTPUT_FOLDER'], ignore_errors=True)
-    shutil.rmtree(app.config['SESSION_FOLDER'], ignore_errors=True)
-
-    config.UPLOAD_FOLDER = orig_upload
-    config.OUTPUT_FOLDER = orig_output
-    config.SESSION_FOLDER = orig_session
+# NOTE: The `client` fixture is provided by conftest.py.
+# It creates an isolated DB/folders and logs in as `testadmin` before yielding.
 
 def test_index_route(client):
     """Test index route loads or can serve static file."""
@@ -104,9 +69,10 @@ def test_upload_and_flow(client):
         '/api/analyze',
         json=analyze_payload
     )
-    assert analyze_response.status_code == 200
+    assert analyze_response.status_code == 202
     analyze_data = analyze_response.get_json()
     assert analyze_data.get("status") == "queued"
+    assert "job_id" in analyze_data
 
     # Poll session detail until background analyze completes and recommendations are populated
     import time
@@ -156,7 +122,7 @@ def test_upload_and_flow(client):
         f'/api/sessions/{session_id}/trigger_process',
         json={"api_key": "MOCK", "actions": chat_data["column_actions"]}
     )
-    assert trigger_response.status_code == 200
+    assert trigger_response.status_code == 202
 
     # Poll status until done
     import time
@@ -204,8 +170,6 @@ def test_upload_and_flow(client):
 
 def test_unified_llm_client_routing():
     """Test the configuration and routing resolution logic of UnifiedLLMClient."""
-    from services.ai_service import UnifiedLLMClient
-
     # Test automatic detection from model name
     client1 = UnifiedLLMClient()
 

@@ -13,6 +13,8 @@ Each entry defines:
     description     — human-readable summary
 """
 
+import re
+
 OPERATIONS = {
 
     # ── STRUCTURAL ────────────────────────────────────────────────────────────
@@ -290,11 +292,11 @@ OPERATIONS = {
 
     # ── ENCODING ───────────────────────────────────────────────────────────────
     "one_hot_encode": {
-        "aliases": ["one-hot", "onehot", "dummy", "dummies", "one hot", "get dummies"],
+        "aliases": ["one-hot", "onehot", "dummy", "dummies", "one hot", "get dummies", "encode", "encode categorical", "categorical encoding", "nominal encode"],
         "scope": "column",
         "changes_rows": False, "changes_columns": True, "changes_values": False,
         "dtype_constraint": "text", "required_params": [],
-        "description": "One-hot encode a categorical column."
+        "description": "One-hot encode a nominal categorical column (default for nominal categoricals)."
     },
     "ordinal_encode": {
         "aliases": ["ordinal", "ordinal encode", "ordinal order"],
@@ -311,7 +313,7 @@ OPERATIONS = {
         "description": "Encode values by their frequency/proportion in the column."
     },
     "label_encode": {
-        "aliases": ["label encode", "label encoding", "factorize", "encode categorical"],
+        "aliases": ["label encode", "label encoding", "factorize"],
         "scope": "column",
         "changes_rows": False, "changes_columns": False, "changes_values": True,
         "dtype_constraint": "any", "required_params": [],
@@ -620,20 +622,32 @@ def get_operation(name: str) -> dict:
 
 def find_operation_by_keyword(keyword: str) -> list:
     """
-    Return a list of (op_name, op_def) where the keyword appears in aliases.
+    Return a list of (op_name, op_def) matching aliases using word boundaries.
+    Prevents false-positive substring collisions (e.g. '0', 'log', 'int' inside other words).
     Sorted by alias specificity (longer alias = more specific = higher priority).
     """
     keyword = keyword.lower().strip()
+    if not keyword:
+        return []
     matches = []
     for op_name, op_def in OPERATIONS.items():
         if op_name in ("unsupported", "ambiguous_instruction"):
             continue
         for alias in op_def["aliases"]:
-            if alias in keyword or keyword in alias:
-                matches.append((op_name, op_def, len(alias)))
+            alias_lower = alias.lower().strip()
+            if alias_lower == keyword:
+                matches.append((op_name, op_def, len(alias_lower) + 100))
+            elif len(alias_lower) >= 3 and re.search(rf'(?:\b|_){re.escape(alias_lower)}(?:\b|_)', keyword):
+                matches.append((op_name, op_def, len(alias_lower)))
     # Sort by alias length descending (most specific first)
     matches.sort(key=lambda x: x[2], reverse=True)
-    return [(m[0], m[1]) for m in matches]
+    seen = set()
+    unique_matches = []
+    for m in matches:
+        if m[0] not in seen:
+            seen.add(m[0])
+            unique_matches.append((m[0], m[1]))
+    return unique_matches
 
 
 def is_likely_id_column(col_name: str) -> bool:
