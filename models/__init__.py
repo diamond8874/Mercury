@@ -82,6 +82,7 @@ class SessionModel(Base):
     col_count = Column(Integer, default=0)
     columns = Column(JSONType, default=list)
     preview = Column(JSONType, default=list)
+    raw_preview = Column(JSONType, default=list)
     goal = Column(Text, default='')
     status = Column(String(50), default='idle')
     progress = Column(Integer, default=0)
@@ -147,6 +148,7 @@ class SessionModel(Base):
             "col_count": self.col_count or 0,
             "columns": self.columns or [],
             "preview": self.preview or [],
+            "raw_preview": self.raw_preview or [],
             "goal": self.goal or "",
             "status": self.status or "idle",
             "progress": self.progress or 0,
@@ -313,7 +315,13 @@ def init_db(db_path: Optional[str] = None):
                 cursor.execute("CREATE INDEX IF NOT EXISTS ix_jobs_user_id ON jobs (user_id)")
             if 'timeout_seconds' not in existing_cols:
                 cursor.execute("ALTER TABLE jobs ADD COLUMN timeout_seconds INTEGER DEFAULT 300 NOT NULL")
+            
+            # Migrate sessions table for raw_preview
+            sess_cols = [r[1] for r in cursor.execute("PRAGMA table_info(sessions)").fetchall()]
+            if 'raw_preview' not in sess_cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN raw_preview TEXT")
+
             conn.connection.commit()
             cursor.close()
     except Exception as e:
-        logging.warning("jobs schema column sync note: %s", e)
+        logging.warning("jobs/sessions schema column sync note: %s", e)

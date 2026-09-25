@@ -77,11 +77,30 @@ def get_session_detail(session_id):
                     df_clean = read_csv_robust(out_path)
                 else:
                     df_clean = pd.read_excel(out_path)
-                session_data["preview"] = get_safe_preview(df_clean, 10)
+                session_data["preview"] = get_safe_preview(df_clean, 15)
                 session_data["row_count"] = len(df_clean)
                 session_data["col_count"] = len(df_clean.columns)
             except Exception as e:
                 logging.warning("Could not refresh preview from cleaned file %s: %s", cleaned_file, e)
+
+        # Backfill raw_preview if empty or fewer than 15 rows
+        raw_prev = session_data.get("raw_preview")
+        if (not raw_prev or len(raw_prev) < 15) and session_data.get("file_id"):
+            raw_path = os.path.join(current_app.config['UPLOAD_FOLDER'], session_data["file_id"])
+            if os.path.exists(raw_path):
+                try:
+                    import pandas as pd
+                    from services.dataset_service import get_safe_preview
+                    from utils.helpers import read_csv_robust
+                    if raw_path.endswith('.csv'):
+                        df_raw = read_csv_robust(raw_path)
+                    else:
+                        df_raw = pd.read_excel(raw_path)
+                    session_data["raw_preview"] = get_safe_preview(df_raw, 15)
+                    if not session_data.get("cleaned_filename"):
+                        session_data["preview"] = session_data["raw_preview"]
+                except Exception as e:
+                    logging.warning("Could not backfill raw_preview: %s", e)
 
     return jsonify(session_data), 200
 

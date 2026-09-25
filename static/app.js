@@ -3,6 +3,7 @@
 const appState = {
     user: null,
     authMode: 'login',
+    previewMode: 'after', // 'after' (cleaned) or 'before' (original)
     apiKey: sessionStorage.getItem('llm_api_key') || '',
     provider: localStorage.getItem('llm_provider') || '',
     model: localStorage.getItem('llm_model') || '',
@@ -108,8 +109,17 @@ const els = {
     columnsRecommendationGrid: document.getElementById('columns-recommendation-grid'),
     processDataBtn: document.getElementById('process-data-btn'), // null after button removal; kept for compatibility
     
-    // Clean Preview Table
+    // Clean Preview Table & Controls
     cleanedPreviewTable: document.getElementById('cleaned-preview-table'),
+    previewModeBefore: document.getElementById('preview-mode-before'),
+    previewModeAfter: document.getElementById('preview-mode-after'),
+    previewRowCountBadge: document.getElementById('preview-row-count-badge'),
+    previewDiffIndicator: document.getElementById('preview-diff-indicator'),
+    previewDiffCount: document.getElementById('preview-diff-count'),
+    previewAppliedChangesCard: document.getElementById('preview-applied-changes-card'),
+    previewChangesStatus: document.getElementById('preview-changes-status'),
+    previewChangesMetrics: document.getElementById('preview-changes-metrics'),
+    previewChangesDetails: document.getElementById('preview-changes-details'),
     
     // Visualizations Chart Grid
     dashboardChartsGrid: document.getElementById('dashboard-charts-grid'),
@@ -145,6 +155,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initDragAndDrop();
     initGoalPresets();
     initTabs();
+    initPreviewControls();
     initChatConsole();
     initSidebarHistory();
     initPowerBIBuilder();
@@ -1327,20 +1338,85 @@ async function executePandasProcess() {
     }
 }
 
+function initPreviewControls() {
+    if (els.previewModeBefore) {
+        els.previewModeBefore.addEventListener('click', () => {
+            appState.previewMode = 'before';
+            els.previewModeBefore.classList.add('active');
+            els.previewModeAfter.classList.remove('active');
+            renderTablePreview();
+        });
+    }
+    if (els.previewModeAfter) {
+        els.previewModeAfter.addEventListener('click', () => {
+            appState.previewMode = 'after';
+            els.previewModeAfter.classList.add('active');
+            els.previewModeBefore.classList.remove('active');
+            renderTablePreview();
+        });
+    }
+}
+
 function renderTablePreview(previewRows) {
     const table = els.cleanedPreviewTable;
+    if (!table) return;
     const thead = table.querySelector('thead');
     const tbody = table.querySelector('tbody');
     
     thead.innerHTML = '';
     tbody.innerHTML = '';
     
-    if (!previewRows || previewRows.length === 0) {
+    const s = appState.sessionData;
+    
+    // Derive raw and clean rows
+    const rawRows = (s && s.raw_preview && Array.isArray(s.raw_preview) && s.raw_preview.length > 0)
+        ? s.raw_preview
+        : [];
+        
+    let cleanRows = [];
+    if (previewRows && Array.isArray(previewRows) && previewRows.length > 0) {
+        cleanRows = previewRows;
+    } else if (s) {
+        cleanRows = (s.bg_result && s.bg_result.preview && s.bg_result.preview.length > 0)
+            ? s.bg_result.preview
+            : (s.preview || []);
+    }
+    
+    // Active mode: 'before' (original) vs 'after' (cleaned)
+    const mode = appState.previewMode || 'after';
+    
+    // Synchronize toggle button active classes
+    if (els.previewModeBefore && els.previewModeAfter) {
+        if (mode === 'before') {
+            els.previewModeBefore.classList.add('active');
+            els.previewModeAfter.classList.remove('active');
+        } else {
+            els.previewModeAfter.classList.add('active');
+            els.previewModeBefore.classList.remove('active');
+        }
+    }
+    
+    let displayRows = [];
+    if (mode === 'before') {
+        displayRows = rawRows.length > 0 ? rawRows : cleanRows;
+    } else {
+        displayRows = cleanRows.length > 0 ? cleanRows : rawRows;
+    }
+    
+    // Update row count badge
+    if (els.previewRowCountBadge) {
+        const modeLabel = mode === 'before' ? 'Original Data' : 'Cleaned Data';
+        els.previewRowCountBadge.innerHTML = `<i class="fa-solid fa-table-rows"></i> Showing ${displayRows.length} Rows (${modeLabel})`;
+    }
+    
+    if (!displayRows || displayRows.length === 0) {
         thead.innerHTML = '<tr><th>No Data Available</th></tr>';
+        if (els.previewDiffIndicator) els.previewDiffIndicator.classList.add('hidden');
+        renderAppliedChangesCard();
         return;
     }
     
-    const headers = Object.keys(previewRows[0]);
+    const headers = Object.keys(displayRows[0]);
     const headerRow = document.createElement('tr');
     headers.forEach(h => {
         const th = document.createElement('th');
@@ -1349,14 +1425,36 @@ function renderTablePreview(previewRows) {
     });
     thead.appendChild(headerRow);
     
-    previewRows.forEach((row, rowIdx) => {
+    let diffCount = 0;
+    const isComparingCleaned = (mode === 'after' && rawRows.length > 0);
+    
+    displayRows.forEach((row, rowIdx) => {
         const tr = document.createElement('tr');
         headers.forEach(h => {
             const td = document.createElement('td');
-            td.textContent = row[h];
+            const cellVal = row[h];
+            td.textContent = cellVal;
             td.contentEditable = "true";
-            td.title = "Click to edit cell value directly";
             td.style.cursor = "pointer";
+            
+            // Check if cell was modified between raw and cleaned
+            let isModified = false;
+            let rawVal = undefined;
+            if (isComparingCleaned && rawRows.length > rowIdx && (h in rawRows[rowIdx])) {
+                rawVal = rawRows[rowIdx][h];
+                if (String(cellVal ?? '') !== String(rawVal ?? '')) {
+                    isModified = true;
+                    diffCount++;
+                }
+            }
+            
+            if (isModified) {
+                td.classList.add('cell-diff-modified');
+                td.title = `Original: "${rawVal ?? ''}" → Cleaned: "${cellVal ?? ''}" (Click to edit)`;
+            } else {
+                td.title = "Click to edit cell value directly";
+            }
+            
             td.addEventListener('blur', async () => {
                 const newVal = td.textContent.trim();
                 if (appState.activeSessionId) {
@@ -1375,6 +1473,125 @@ function renderTablePreview(previewRows) {
         });
         tbody.appendChild(tr);
     });
+    
+    // Update diff indicator badge
+    if (els.previewDiffIndicator && els.previewDiffCount) {
+        if (diffCount > 0 && mode === 'after') {
+            els.previewDiffCount.textContent = diffCount;
+            els.previewDiffIndicator.classList.remove('hidden');
+        } else {
+            els.previewDiffIndicator.classList.add('hidden');
+        }
+    }
+    
+    // Render the changes summary card below the table
+    renderAppliedChangesCard();
+}
+
+function renderAppliedChangesCard() {
+    const s = appState.sessionData;
+    if (!s || !els.previewChangesStatus) return;
+    
+    const statusBadge = els.previewChangesStatus;
+    const metricsGrid = els.previewChangesMetrics;
+    const detailsList = els.previewChangesDetails;
+    
+    metricsGrid.innerHTML = '';
+    detailsList.innerHTML = '';
+    
+    const isCleaned = !!(s.cleaned_filename || (s.bg_result && s.bg_result.preview));
+    
+    // Status badge
+    if (isCleaned) {
+        statusBadge.textContent = 'Clean Processed';
+        statusBadge.className = 'changes-status-badge active-clean';
+    } else {
+        statusBadge.textContent = 'Raw Data (Unprocessed)';
+        statusBadge.className = 'changes-status-badge';
+    }
+    
+    // Metrics
+    const initialRows = s.stats?.initial_rows || s.row_count || 0;
+    const finalRows = s.stats?.final_rows || s.row_count || 0;
+    const initialCols = s.columns?.length || s.col_count || 0;
+    const droppedColsCount = s.stats?.dropped_columns?.length || 0;
+    const finalCols = s.stats?.final_cols || (initialCols - droppedColsCount);
+    
+    const transCols = Object.values(s.column_actions || {}).filter(a => a.action === 'transform').length;
+    const auditCount = s.audit_log?.length || (s.stats?.transformations_applied?.length || 0);
+
+    const metrics = [
+        { label: 'Total Rows', val: Number(finalRows).toLocaleString() },
+        { label: 'Active Columns', val: finalCols },
+        { label: 'Columns Dropped', val: droppedColsCount },
+        { label: 'Transformations', val: Math.max(transCols, auditCount) }
+    ];
+    
+    metrics.forEach(m => {
+        const box = document.createElement('div');
+        box.className = 'change-metric-box';
+        box.innerHTML = `
+            <span class="change-metric-val">${escapeHTML(m.val)}</span>
+            <span class="change-metric-lbl">${escapeHTML(m.label)}</span>
+        `;
+        metricsGrid.appendChild(box);
+    });
+    
+    // Detailed list
+    let hasDetails = false;
+    
+    // 1. From audit_log if available
+    if (s.audit_log && s.audit_log.length > 0) {
+        s.audit_log.forEach(entry => {
+            hasDetails = true;
+            const item = document.createElement('div');
+            item.className = 'change-detail-item';
+            const col = entry.column || entry.column_name || 'Dataset';
+            const desc = entry.description || entry.message || entry.action || JSON.stringify(entry);
+            item.innerHTML = `
+                <i class="fa-solid fa-check-circle"></i>
+                <div>
+                    <span class="col-badge">${escapeHTML(col)}</span>
+                    <span>${escapeHTML(desc)}</span>
+                </div>
+            `;
+            detailsList.appendChild(item);
+        });
+    }
+    
+    // 2. From column_actions
+    if (!hasDetails && s.column_actions && Object.keys(s.column_actions).length > 0) {
+        Object.entries(s.column_actions).forEach(([colName, act]) => {
+            if (act.action === 'transform' || act.action === 'drop') {
+                hasDetails = true;
+                const item = document.createElement('div');
+                item.className = 'change-detail-item';
+                const actionIcon = act.action === 'drop' ? 'fa-trash-can' : 'fa-wand-magic-sparkles';
+                const actionColor = act.action === 'drop' ? 'var(--danger)' : '#10b981';
+                const text = act.transformation || act.reason || (act.action === 'drop' ? 'Column dropped per objective' : 'Transformed');
+                item.innerHTML = `
+                    <i class="fa-solid ${actionIcon}" style="color: ${actionColor}"></i>
+                    <div>
+                        <span class="col-badge">${escapeHTML(colName)}</span>
+                        <strong>${act.action.toUpperCase()}:</strong> <span>${escapeHTML(text)}</span>
+                    </div>
+                `;
+                detailsList.appendChild(item);
+            }
+        });
+    }
+    
+    // 3. Fallback / Empty message
+    if (!hasDetails) {
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'change-detail-empty';
+        if (isCleaned) {
+            emptyDiv.innerHTML = '<i class="fa-solid fa-circle-info"></i> All columns retained per schema goal. No lossy modifications applied.';
+        } else {
+            emptyDiv.innerHTML = '<i class="fa-solid fa-circle-info"></i> No cleaning transformations processed yet. You are currently viewing the original raw data. Switch to <strong>Schema Actions</strong> to review recommended actions, then click <strong>Process Data</strong> or prompt the AI Assistant in chat.';
+        }
+        detailsList.appendChild(emptyDiv);
+    }
 }
 
 function renderCharts(chartsData) {

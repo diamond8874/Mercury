@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+- **15-Row Data Preview, Before/After Toggle & Applied Changes Card (`models/__init__.py`, `repositories/session_repository.py`, `services/dataset_service.py`, `routes/sessions.py`, `static/index.html`, `static/style.css`, `static/app.js`)**:
+  - `models/__init__.py`: Added `raw_preview` JSON column to `SessionModel` and automatic SQLite schema migration in `init_db()` (`ALTER TABLE sessions ADD COLUMN raw_preview TEXT`).
+  - `repositories/session_repository.py`: Added `raw_preview` support across session creation and optimistic lock update branches in `save()`.
+  - `services/dataset_service.py`: Upgraded `get_safe_preview()` default from 10 to 15 rows. Persists both `raw_preview` and `preview` (15 rows) on initial upload, and generates 15-row previews during cleaning processing and individual cell updates.
+  - `routes/sessions.py`: Ensured `/api/sessions/<session_id>` refreshes 15 rows of cleaned preview and backfills 15 rows of `raw_preview` from the original uploaded file if absent or smaller.
+  - `static/index.html` & `static/style.css`: Added Before/After pill toggle toolbar above preview table, showing status badge ("Showing 15 Rows") and modified cell count indicator. Added `.cell-diff-modified` highlighting changed cells with subtle emerald accent and original-value hover tooltips. Added Applied Changes & Cleaning Summary card below table displaying metrics and transformation rules.
+  - `static/app.js`: Implemented `appState.previewMode` ('before' vs 'after') toggle handler, live cell difference detection comparing cleaned rows against raw rows, and dynamic rendering of applied transformation details from `audit_log`, `column_actions`, and `stats`.
+
 - **Sanitize Illegal Excel XML Characters (`utils/helpers.py`, `services/dataset_service.py`, `services/data_service.py`)**:
   - `utils/helpers.py`: Implemented `sanitize_dataframe_for_excel()` and `safe_to_excel()`. Automatically scrubs non-printable ASCII control characters (`0x00`-`0x08`, `0x0B`-`0x0C`, `0x0E`-`0x1F`) using openpyxl's `ILLEGAL_CHARACTERS_RE`.
   - Replaced all raw `df.to_excel()` calls in `dataset_service.py` and `data_service.py` with `safe_to_excel()`. Fixes `openpyxl.utils.exceptions.IllegalCharacterError` ("... cannot be used in worksheets") when saving cleaned datasets containing raw scraped or corrupted control characters.

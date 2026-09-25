@@ -211,11 +211,49 @@
                                 
                                 <!-- TAB 2: Clean Preview -->
                                 <div class="tab-pane" id="tab-preview">
+                                    <!-- Before / After Toggle & Status Toolbar -->
+                                    <div class="preview-controls-bar">
+                                        <div class="preview-mode-toggle-group">
+                                            <button type="button" class="preview-mode-btn" id="preview-mode-before">
+                                                <i class="fa-solid fa-clock-rotate-left"></i> Before (Original Data)
+                                            </button>
+                                            <button type="button" class="preview-mode-btn active" id="preview-mode-after">
+                                                <i class="fa-solid fa-wand-magic-sparkles"></i> After (Cleaned Data)
+                                            </button>
+                                        </div>
+                                        <div class="preview-indicators">
+                                            <span class="preview-badge" id="preview-row-count-badge">
+                                                <i class="fa-solid fa-table-rows"></i> Showing 15 Rows
+                                            </span>
+                                            <span class="preview-diff-badge hidden" id="preview-diff-indicator">
+                                                <i class="fa-solid fa-circle-check"></i> <span id="preview-diff-count">0</span> changes highlighted
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Table Container -->
                                     <div class="table-scroll-container">
                                         <table class="preview-table" id="cleaned-preview-table">
                                             <thead></thead>
                                             <tbody></tbody>
                                         </table>
+                                    </div>
+
+                                    <!-- Applied Changes & Cleaning Summary Below Preview -->
+                                    <div class="preview-changes-card" id="preview-applied-changes-card">
+                                        <div class="changes-card-header">
+                                            <div class="changes-card-title">
+                                                <i class="fa-solid fa-clipboard-check"></i>
+                                                <h4>Applied Transformations &amp; Cleaning Summary</h4>
+                                            </div>
+                                            <span class="changes-status-badge" id="preview-changes-status">No Changes Applied Yet</span>
+                                        </div>
+                                        <div class="changes-metrics-grid" id="preview-changes-metrics">
+                                            <!-- Dynamically filled with metrics -->
+                                        </div>
+                                        <div class="changes-details-list" id="preview-changes-details">
+                                            <!-- Dynamically filled with applied rules and descriptions -->
+                                        </div>
                                     </div>
                                 </div>
                                 

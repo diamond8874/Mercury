@@ -113,6 +113,7 @@ class SessionRepository:
                     col_count=data.get('col_count', 0),
                     columns=data.get('columns', []),
                     preview=data.get('preview', []),
+                    raw_preview=data.get('raw_preview', []),
                     goal=data.get('goal', ''),
                     status=data.get('status', 'idle'),
                     progress=data.get('progress', 0),
@@ -144,6 +145,7 @@ class SessionRepository:
                 if 'col_count' in data: sess_obj.col_count = data['col_count']
                 if 'columns' in data: sess_obj.columns = data['columns']
                 if 'preview' in data: sess_obj.preview = data['preview']
+                if 'raw_preview' in data: sess_obj.raw_preview = data['raw_preview']
                 if 'goal' in data: sess_obj.goal = data['goal']
                 if 'status' in data: sess_obj.status = data['status']
                 if 'progress' in data: sess_obj.progress = data['progress']

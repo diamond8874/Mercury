@@ -17,7 +17,7 @@ from utils.helpers import read_csv_robust, safe_to_excel
 from services.cleaning import run_cleaning_engine, build_cleaning_plan, validate_plan
 
 
-def get_safe_preview(df, n=10):
+def get_safe_preview(df, n=15):
     """Safely converts DataFrame head to dict records for JSON serialization."""
     if df is None or df.empty:
         return []
@@ -79,7 +79,7 @@ def save_uploaded_file(file_storage, user_id=None):
                 "sample_values": sample_vals
             })
 
-        preview_data = get_safe_preview(df, 5)
+        preview_data = get_safe_preview(df, 15)
 
         session_id = str(uuid.uuid4())
         session_data = {
@@ -94,6 +94,7 @@ def save_uploaded_file(file_storage, user_id=None):
             "col_count": num_cols,
             "columns": columns,
             "preview": preview_data,
+            "raw_preview": preview_data,
             "goal": "",
             "column_actions": {},
             "chat_history": [
@@ -170,7 +171,7 @@ def process_cleaning_for_session(session_data, actions, sheet_name="Default"):
         session_data["col_count"] = df.shape[1]
         session_data["charts"] = []
 
-        preview_data = get_safe_preview(df, 10)
+        preview_data = get_safe_preview(df, 15)
         session_data["preview"] = preview_data
         session_data["bg_result"] = {
             "preview": preview_data,
@@ -245,7 +246,7 @@ def update_cell_value(session_data, row_idx, col_name, new_val):
         working_path = os.path.join(current_app.config['OUTPUT_FOLDER'], working_filename)
         safe_to_excel(df, working_path, index=False)
         session_data["cleaned_filename"] = working_filename
-        session_data["preview"] = get_safe_preview(df, 10)
+        session_data["preview"] = get_safe_preview(df, 15)
         save_session(session_data)
 
         return {
