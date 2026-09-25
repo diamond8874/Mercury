@@ -258,6 +258,14 @@ class JobModel(Base):
         }
 
 
+class SchemaCacheModel(Base):
+    __tablename__ = 'schema_cache'
+
+    schema_hash = Column(String(64), primary_key=True)
+    goal_hash = Column(String(64), primary_key=True)
+    approved_plan = Column(JSONType, nullable=False)
+    created_at = Column(String(50), nullable=False)
+
 # Global Engine & Session Factory
 _engine = None
 _SessionFactory = None

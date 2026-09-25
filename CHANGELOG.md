@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+- **UI Session Switching Freeze (`routes/sessions.py`)**:
+  - Removed synchronous, blocking `pandas` Excel file reads (`pd.read_excel`) from the `GET /api/sessions/<session_id>` endpoint. Dataset previews are now served instantly from cached `session_data["preview"]` and `session_data["raw_preview"]`, completely eliminating the UI infinite loader hang when switching between large historical datasets.
+
 - **Fix AI Analysis Truncation Crash, JSON Parsing Resilience & jsdelivr CSP (`app.py`, `utils/helpers.py`, `routes/cleaning.py`, `static/app.js`)**:
   - `app.py`: Added `https://cdn.jsdelivr.net` to the Content Security Policy `connect-src` directive, eliminating CSP source map blocking errors (`chart.umd.min.js.map`).
   - `routes/cleaning.py`: Increased LLM `max_tokens` from 1,024 to 4,096 in `_do_analyze()`. Previously, datasets with many columns (e.g. 35+ columns in `alzheimers_disease_data.csv`) exceeded the 1,024 token limit mid-generation, throwing `JSONDecodeError: Unterminated string starting at: line 19 column 17 (char 464)`.

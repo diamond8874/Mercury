@@ -151,6 +151,45 @@ def process_cleaning_for_session(session_data, actions, sheet_name="Default"):
 
         session_data["column_actions"] = actions
 
+        import hashlib
+        from models import get_session_factory, SchemaCacheModel
+        from datetime import datetime
+        
+        schema_fingerprint = "|".join([f"{col}:{str(df[col].dtype)}" for col in df.columns])
+        schema_hash = hashlib.md5(schema_fingerprint.encode('utf-8')).hexdigest()
+        goal = session_data.get("goal", "")
+        goal_hash = hashlib.md5(goal.strip().lower().encode('utf-8')).hexdigest()
+        
+        approved_plan = []
+        for col_name, action_data in actions.items():
+            approved_plan.append({
+                "column": col_name,
+                "action": action_data.get("action", "keep"),
+                "reason": action_data.get("reason", "Approved by user"),
+                "transformation": action_data.get("transformation", None),
+                "operations": action_data.get("operations", [])
+            })
+            
+        db_session = get_session_factory()()
+        try:
+            cache_entry = db_session.query(SchemaCacheModel).filter_by(schema_hash=schema_hash, goal_hash=goal_hash).first()
+            if not cache_entry:
+                cache_entry = SchemaCacheModel(
+                    schema_hash=schema_hash, 
+                    goal_hash=goal_hash, 
+                    approved_plan=approved_plan,
+                    created_at=datetime.now().isoformat()
+                )
+                db_session.add(cache_entry)
+            else:
+                cache_entry.approved_plan = approved_plan
+            db_session.commit()
+        except Exception as e:
+            db_session.rollback()
+            logging.error(f"Failed to cache schema plan: {e}")
+        finally:
+            db_session.close()
+
         clean_res = run_cleaning_engine(df, actions)
         df = clean_res["df"]
         audit_log = clean_res["audit_log"]

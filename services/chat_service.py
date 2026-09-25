@@ -287,7 +287,11 @@ If no changes are needed, return empty schema_updates {{}}.
                 full_raw += text_part
 
         try:
-            ai_data = parse_json_response(full_raw)
+            import json_repair
+            ai_data = json_repair.loads(full_raw)
+            if not isinstance(ai_data, dict):
+                ai_data = parse_json_response(full_raw)
+                
             clean_message = ai_data.get("message", full_raw.strip())
             schema_updates = ai_data.get("schema_updates", {})
         except Exception:

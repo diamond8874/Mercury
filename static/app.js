@@ -997,8 +997,8 @@ function startStatusPolling(sessionId, opts = {}) {
         }
         _statusPollCount++;
 
-        // Timeout safeguard (12s) - immediately force hide loader if slow
-        if (_statusPollCount > 6) {
+        // Timeout safeguard (300s) - immediately force hide loader if slow
+        if (_statusPollCount > 150) {
             clearInterval(_statusPollTimer); _statusPollTimer = null;
             showBgProcessingIndicator(false);
             hideLoader();
@@ -1142,6 +1142,17 @@ function renderSchemaActionsGrid() {
         card.id = `col-card-${btoa(col.name).replace(/=/g, '')}`;
         
         // Build schema card safely with textContent for all user/dataset/LLM-sourced strings
+        let badgeHtml = '';
+        let cleanReason = escapeHTML(rec.reason || '');
+        if (cleanReason.startsWith("AI Semantic Override:")) {
+            badgeHtml = `<span class="reason-badge ai-badge"><i class="fas fa-brain"></i> AI Override</span>`;
+            cleanReason = cleanReason.replace("AI Semantic Override:", "").trim();
+        } else if (cleanReason.startsWith("Statistical Rule:") || cleanReason.startsWith("Pattern Rule:")) {
+            badgeHtml = `<span class="reason-badge math-badge"><i class="fas fa-calculator"></i> Auto-Rule</span>`;
+        } else if (cleanReason.startsWith("Cached AI Recommendation")) {
+            badgeHtml = `<span class="reason-badge cache-badge"><i class="fas fa-bolt"></i> Cached AI</span>`;
+        }
+
         card.innerHTML = `
             <div class="col-card-header">
                 <div class="col-name-wrapper">
@@ -1158,7 +1169,10 @@ function renderSchemaActionsGrid() {
                 </div>
             </div>
             <div class="col-card-body">
-                <div class="ai-reasoning"><p>${escapeHTML(rec.reason)}</p></div>
+                <div class="ai-reasoning">
+                    ${badgeHtml}
+                    <p>${cleanReason}</p>
+                </div>
                 <div class="transformation-editor ${rec.action === 'transform' ? '' : 'hidden'}">
                     <label>Transformation Logic:</label>
                     <input type="text" class="transform-input" value="${escapeHTML(rec.transformation || '')}" placeholder="e.g. Impute missing with median">
@@ -2167,3 +2181,175 @@ function initPowerBIBuilder() {
         }
     }
 }
+
+/* --- ENTERPRISE AUTOCOMPLETE & PROMPT LIBRARY --- */
+
+const promptLibrary = [
+    // --- Data Quality & Missing Values ---
+    { text: "Drop columns that are mostly empty", category: "Data Quality", usage: "🔥 Highly Used" },
+    { text: "Remove duplicate rows from the dataset", category: "Data Quality", usage: "🔥 Highly Used" },
+    { text: "Fill empty numbers with the average", category: "Missing Values", usage: "🔥 Highly Used" },
+    { text: "Fill empty numbers with the median", category: "Missing Values", usage: "📊 92% Match" },
+    { text: "Fill empty text values with 'Unknown'", category: "Missing Values", usage: "📊 85% Match" },
+    { text: "Drop rows where the target variable is missing", category: "Missing Values", usage: "🤖 Data Science" },
+
+    // --- Text & Formatting ---
+    { text: "Convert all text to lowercase", category: "Text Formatting", usage: "📝 Formatting" },
+    { text: "Trim extra spaces from all text columns", category: "Text Formatting", usage: "🔥 Highly Used" },
+    { text: "Extract numbers from text (e.g. '100 USD' -> 100)", category: "Text Parsing", usage: "💡 Pro Tip" },
+    { text: "Extract the domain name from all email addresses", category: "Text Parsing", usage: "💡 Pro Tip" },
+    { text: "Standardize Yes/No to 1/0", category: "Text Formatting", usage: "📊 88% Match" },
+
+    // --- Dates & Times ---
+    { text: "Fix all the dates so they look the same", category: "Dates", usage: "🔥 Highly Used" },
+    { text: "Extract just the year from the date column", category: "Dates", usage: "💡 Pro Tip" },
+    { text: "Calculate the age from the birthdate column", category: "Dates", usage: "🏥 Healthcare" },
+
+    // --- Outliers & Math ---
+    { text: "Remove extreme outliers in numbers", category: "Math & Outliers", usage: "🤖 Data Science" },
+    { text: "Cap extreme values instead of dropping them", category: "Math & Outliers", usage: "🤖 Data Science" },
+    { text: "Round all decimals to two places", category: "Math", usage: "📈 Finance" },
+    { text: "Make all negative numbers positive (absolute value)", category: "Math", usage: "📈 Finance" },
+
+    // --- Machine Learning & Feature Engineering ---
+    { text: "Remove ID columns and useless data", category: "Feature Selection", usage: "📊 94% Match" },
+    { text: "Drop columns that have the exact same value everywhere", category: "Feature Selection", usage: "🤖 Data Science" },
+    { text: "Turn text categories into numbers", category: "Machine Learning", usage: "📊 88% Match" },
+    { text: "Scale all numeric features between 0 and 1", category: "Machine Learning", usage: "🤖 Data Science" },
+    
+    // --- Industry Specific ---
+    { text: "Remove personal info like names, emails, and phones", category: "Privacy", usage: "🏥 Healthcare" },
+    { text: "Fix currency formatting and fill empty prices with 0", category: "Finance", usage: "📈 Finance" },
+    { text: "Group small categories into an 'Other' bucket", category: "E-Commerce", usage: "🛒 Retail" }
+];
+
+function setupAutocomplete(inputId, dropdownId, isSchemaAware = false) {
+    const input = document.getElementById(inputId);
+    const dropdown = document.getElementById(dropdownId);
+    if (!input || !dropdown) return;
+    
+    let selectedIdx = -1;
+    let currentMatches = [];
+
+    input.addEventListener("input", function(e) {
+        const val = this.value.toLowerCase().trim();
+        dropdown.innerHTML = "";
+        selectedIdx = -1;
+        
+        if (!val) {
+            dropdown.classList.add("hidden");
+            return;
+        }
+
+        // Fuzzy match logic + Schema awareness
+        currentMatches = [];
+        const words = val.split(" ");
+        
+        // Let us dynamically inject column names if schema is aware
+        let dynamicPrompts = [...promptLibrary];
+        if (isSchemaAware && window.currentSession && window.currentSession.columns) {
+            const numCols = window.currentSession.columns.filter(c => c.type.includes("int") || c.type.includes("float"));
+            if (numCols.length > 0) {
+                dynamicPrompts.push({ 
+                    text: `Clip outliers in [${numCols[0].name}]`, 
+                    category: "Dynamic", 
+                    usage: "✨ Schema Match" 
+                });
+            }
+        }
+
+        dynamicPrompts.forEach(prompt => {
+            const pText = prompt.text.toLowerCase();
+            let matchScore = 0;
+            words.forEach(w => {
+                if (pText.includes(w)) matchScore++;
+            });
+            if (matchScore > 0 || val.length > 3 && pText.includes(val.substring(0,3))) {
+                currentMatches.push({ ...prompt, score: matchScore });
+            }
+        });
+
+        currentMatches.sort((a,b) => b.score - a.score);
+        currentMatches = currentMatches.slice(0, 5); // top 5
+
+        if (currentMatches.length === 0) {
+            dropdown.classList.add("hidden");
+            return;
+        }
+
+        currentMatches.forEach((match, idx) => {
+            const div = document.createElement("div");
+            div.className = "autocomplete-item";
+            
+            // Highlight matches
+            let highlightedText = match.text;
+            words.forEach(w => {
+                if(w.length > 2) {
+                    const regex = new RegExp(`(${w})`, "gi");
+                    highlightedText = highlightedText.replace(regex, "<b>$1</b>");
+                }
+            });
+
+            div.innerHTML = `
+                <div class="autocomplete-title">${highlightedText}</div>
+                <div class="autocomplete-meta">
+                    <span>${match.category}</span>
+                    <span class="${match.usage.includes("🔥") ? "badge-highly-used" : "badge-match"}">${match.usage}</span>
+                </div>
+            `;
+            
+            div.addEventListener("click", function() {
+                input.value = match.text;
+                dropdown.classList.add("hidden");
+                input.focus();
+            });
+            dropdown.appendChild(div);
+        });
+        
+        dropdown.classList.remove("hidden");
+    });
+
+    input.addEventListener("keydown", function(e) {
+        if (dropdown.classList.contains("hidden")) return;
+        const items = dropdown.getElementsByClassName("autocomplete-item");
+        
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            selectedIdx++;
+            if (selectedIdx >= items.length) selectedIdx = 0;
+            updateSelection(items);
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            selectedIdx--;
+            if (selectedIdx < 0) selectedIdx = items.length - 1;
+            updateSelection(items);
+        } else if (e.key === "Enter") {
+            if (selectedIdx > -1) {
+                e.preventDefault();
+                items[selectedIdx].click();
+            }
+        }
+    });
+
+    function updateSelection(items) {
+        for(let i=0; i<items.length; i++) {
+            items[i].classList.remove("selected");
+        }
+        if(selectedIdx > -1 && items[selectedIdx]) {
+            items[selectedIdx].classList.add("selected");
+        }
+    }
+
+    document.addEventListener("click", function(e) {
+        if(e.target !== input && e.target !== dropdown && !dropdown.contains(e.target)) {
+            dropdown.classList.add("hidden");
+        }
+    });
+}
+
+// Initialize Autocomplete
+document.addEventListener("DOMContentLoaded", () => {
+    setupAutocomplete("goal-input", "goal-autocomplete", false);
+    setupAutocomplete("chat-input", "chat-autocomplete", true);
+});
+

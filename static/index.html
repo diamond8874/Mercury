@@ -118,15 +118,27 @@
                         <h3><i class="fa-solid fa-bullseye icon-prefix"></i> What is your Machine Learning or Analysis goal?</h3>
                         <p class="subtitle">AI will parse your schema and remove irrelevant data to perfectly align with this goal.</p>
                         
-                        <div class="goal-input-wrapper">
-                            <textarea id="goal-input" placeholder="Example: I want to build a model to predict customer churn based on their payment history, service issues, and demographic data."></textarea>
+                        <div class="goal-input-wrapper" style="position: relative;">
+                            <textarea id="goal-input" placeholder="Example: I want to build a model to predict customer churn based on their payment history..."></textarea>
+                            <div id="goal-autocomplete" class="autocomplete-dropdown hidden"></div>
                         </div>
                         
-                        <div class="presets-container">
-                            <span class="preset-label">Suggested Goals:</span>
-                            <button class="preset-btn" data-goal="Predict house price based on area, bedrooms, and location.">House Price Prediction</button>
-                            <button class="preset-btn" data-goal="Classify if an email is spam or normal ham communication.">Spam Email Classifier</button>
-                            <button class="preset-btn" data-goal="Segment customers based on yearly spending and purchase frequency.">Customer Segmentation</button>
+                        <div class="industry-packs-container">
+                            <span class="preset-label">Industry Starter Packs:</span>
+                            <div class="industry-cards">
+                                <button class="preset-btn industry-card" data-goal="Remove all personal info and fix the date formats.">
+                                    <i class="fa-solid fa-hospital"></i> <b>Healthcare</b>
+                                </button>
+                                <button class="preset-btn industry-card" data-goal="Fill empty transaction amounts with 0 and fix currencies.">
+                                    <i class="fa-solid fa-chart-line"></i> <b>Finance & Banking</b>
+                                </button>
+                                <button class="preset-btn industry-card" data-goal="Clean up product categories and fix missing prices.">
+                                    <i class="fa-solid fa-cart-shopping"></i> <b>E-Commerce</b>
+                                </button>
+                                <button class="preset-btn industry-card" data-goal="Drop empty columns and fill missing numbers with the average.">
+                                    <i class="fa-solid fa-robot"></i> <b>Machine Learning</b>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -165,8 +177,9 @@
                             </div>
                             
                             <!-- Chat Input bar -->
-                            <div class="chat-input-wrapper">
+                            <div class="chat-input-wrapper" style="position: relative;">
                                 <textarea id="chat-input" placeholder="Type a message (e.g. 'Drop Age', 'Make report')..." rows="1"></textarea>
+                                <div id="chat-autocomplete" class="autocomplete-dropdown autocomplete-up hidden"></div>
                                 <button class="btn-icon send-msg-btn" id="chat-send-btn">
                                     <i class="fa-solid fa-paper-plane"></i>
                                 </button>

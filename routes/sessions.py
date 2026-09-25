@@ -64,43 +64,8 @@ def get_session_detail(session_id):
     if err_resp:
         return err_resp
 
-    # Ensure preview reflects the cleaned dataset if already processed
-    cleaned_file = session_data.get("cleaned_filename")
-    if cleaned_file:
-        out_path = os.path.join(current_app.config['OUTPUT_FOLDER'], cleaned_file)
-        if os.path.exists(out_path):
-            try:
-                import pandas as pd
-                from services.dataset_service import get_safe_preview
-                from utils.helpers import read_csv_robust
-                if out_path.endswith('.csv'):
-                    df_clean = read_csv_robust(out_path)
-                else:
-                    df_clean = pd.read_excel(out_path)
-                session_data["preview"] = get_safe_preview(df_clean, 15)
-                session_data["row_count"] = len(df_clean)
-                session_data["col_count"] = len(df_clean.columns)
-            except Exception as e:
-                logging.warning("Could not refresh preview from cleaned file %s: %s", cleaned_file, e)
-
-        # Backfill raw_preview if empty or fewer than 15 rows
-        raw_prev = session_data.get("raw_preview")
-        if (not raw_prev or len(raw_prev) < 15) and session_data.get("file_id"):
-            raw_path = os.path.join(current_app.config['UPLOAD_FOLDER'], session_data["file_id"])
-            if os.path.exists(raw_path):
-                try:
-                    import pandas as pd
-                    from services.dataset_service import get_safe_preview
-                    from utils.helpers import read_csv_robust
-                    if raw_path.endswith('.csv'):
-                        df_raw = read_csv_robust(raw_path)
-                    else:
-                        df_raw = pd.read_excel(raw_path)
-                    session_data["raw_preview"] = get_safe_preview(df_raw, 15)
-                    if not session_data.get("cleaned_filename"):
-                        session_data["preview"] = session_data["raw_preview"]
-                except Exception as e:
-                    logging.warning("Could not backfill raw_preview: %s", e)
+    # Previews are already cached in session_data["preview"] and session_data["raw_preview"]
+    # We no longer synchronously parse the raw/cleaned Excel files here to prevent UI freezing.
 
     return jsonify(session_data), 200
 
@@ -231,8 +196,16 @@ def get_processing_status(session_id):
             }), 200
 
     # Normalize succeeded -> done for frontend compatibility
-    if job_status == "succeeded":
-        job_status = "done"
+    if job_status in ["running", "queued"]:
+        if job.get("job_type") == "analyze":
+            job_status = "analyzing"
+        else:
+            job_status = "processing"
+    elif job_status == "succeeded":
+        if job.get("job_type") == "analyze":
+            job_status = "analyze_done"
+        else:
+            job_status = "done"
     elif job_status == "failed":
         job_status = "error"
 
