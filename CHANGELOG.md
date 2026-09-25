@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Instant Access to Data Preview & Visualizations on Upload (`static/index.html`, `static/app.js`)**:
+  - `static/index.html`: Removed `disabled` attribute from the Data Preview and Visualizations tab buttons so users can inspect dataset rows and generate on-demand visual charts immediately upon upload without waiting for cleaning processing.
+  - `static/app.js`: Updated `enableTabs()` and `renderLoadedSessionUI()` to ensure preview and visualization panes remain freely navigable at all stages of session exploration.
+
 - **Hybrid Charset-Normalizer Multi-Encoding CSV Parser & 2,000,000 Row Limit (`utils/helpers.py`, `utils/upload_validator.py`, `services/dataset_service.py`, `services/data_service.py`, `routes/cleaning.py`, `routes/visualization.py`, `routes/sessions.py`, `config.py`, `.env`)**:
   - `utils/helpers.py`: Implemented hybrid `read_csv_robust()` utilizing a high-speed 64KB sample probe with `charset_normalizer.from_bytes()` (<10ms overhead), followed by an intelligent priority fallback ladder (`utf-8`, `utf-8-sig`, `cp1252`, `latin-1`) and `errors='replace'` guard. Handles international and accented character sets (Latin-1, Shift-JIS, Cyrillic, GBK) without crashing or hanging on 100MB+ files.
   - Replaced all raw `pd.read_csv()` invocations across upload validation, dataset ingestion, background cleaning jobs, custom charts, and preview refresh with `read_csv_robust()`.

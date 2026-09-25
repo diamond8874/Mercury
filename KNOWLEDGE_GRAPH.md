@@ -29,7 +29,7 @@ Mercury uses a clean, decoupled **Adapter/Factory Pattern** to resolve, configur
 ```
 
 ### Key Components:
-1. **Frontend Settings Panel (`static/index.html` & `static/app.js`)**: Allows users to select an LLM Provider, select/type an LLM Model, override the API Key, or provide a Custom Base URL. These settings are persisted in `localStorage` and sent with every API request.
+1. **Frontend Settings & Workspace Tabs (`static/index.html` & `static/app.js`)**: Allows users to select an LLM Provider, select/type an LLM Model, override the API Key, or provide a Custom Base URL. Provides immediate, unblocked tab navigation across Schema Actions, Data Preview, and Visualizations upon dataset upload.
 2. **REST API Endpoints (`components/routes.py`)**: Endpoints `/api/analyze`, `/api/sessions/<id>/chat`, and `/api/sessions/<id>/chat/stream` parse the frontend's LLM configuration parameters and pass them to the backend client creator.
 3. **Unified LLM Client (`services/ai_service.py`)**: Standardizes prompt formatting, system messages, streaming responses, and error handling. It utilizes LiteLLM to communicate with diverse AI providers while exposing an OpenAI-compatible interface (`client.chat.completions.create(...)`).
 

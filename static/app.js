@@ -759,8 +759,10 @@ function initTabs() {
 }
 
 function enableTabs(enable) {
-    els.tabBtnPreview.disabled = !enable;
-    els.tabBtnViz.disabled = !enable;
+    // Data Preview and Visualizations are always accessible once a dataset is loaded
+    els.tabBtnPreview.disabled = false;
+    els.tabBtnViz.disabled = false;
+    // Export Report tab requires cleaning completion
     els.tabBtnExport.disabled = !enable;
 }
 
@@ -868,7 +870,6 @@ function renderLoadedSessionUI() {
         }
     } else {
         enableTabs(false);
-        switchToTab('tab-schema');
         if (els.processDataBtn) {
             els.processDataBtn.disabled = true;
         }
