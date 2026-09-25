@@ -54,3 +54,24 @@ def read_csv_robust(file_path: str, **kwargs) -> pd.DataFrame:
     # 3. Ultimate non-blocking safety net
     logger.warning("All encodings failed for %s, falling back to encoding_errors='replace'", file_path)
     return pd.read_csv(file_path, encoding="utf-8", encoding_errors="replace", **kwargs)
+
+def sanitize_dataframe_for_excel(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Strips non-printable control characters (ASCII 0-8, 11-12, 14-31) that cause
+    openpyxl IllegalCharacterError ('... cannot be used in worksheets').
+    """
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+    df_clean = df.copy()
+    for col in df_clean.select_dtypes(include=['object', 'string']).columns:
+        df_clean[col] = df_clean[col].apply(
+            lambda val: ILLEGAL_CHARACTERS_RE.sub('', val) if isinstance(val, str) else val
+        )
+    return df_clean
+
+def safe_to_excel(df: pd.DataFrame, output_path: str, index: bool = False, **kwargs) -> None:
+    """
+    Safely exports a DataFrame to an Excel workbook (.xlsx), stripping illegal XML control
+    characters so openpyxl never throws IllegalCharacterError.
+    """
+    clean_df = sanitize_dataframe_for_excel(df)
+    clean_df.to_excel(output_path, index=index, engine='openpyxl', **kwargs)

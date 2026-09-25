@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+- **Sanitize Illegal Excel XML Characters (`utils/helpers.py`, `services/dataset_service.py`, `services/data_service.py`)**:
+  - `utils/helpers.py`: Implemented `sanitize_dataframe_for_excel()` and `safe_to_excel()`. Automatically scrubs non-printable ASCII control characters (`0x00`-`0x08`, `0x0B`-`0x0C`, `0x0E`-`0x1F`) using openpyxl's `ILLEGAL_CHARACTERS_RE`.
+  - Replaced all raw `df.to_excel()` calls in `dataset_service.py` and `data_service.py` with `safe_to_excel()`. Fixes `openpyxl.utils.exceptions.IllegalCharacterError` ("... cannot be used in worksheets") when saving cleaned datasets containing raw scraped or corrupted control characters.
 
 - **Instant Access to Data Preview & Visualizations on Upload (`static/index.html`, `static/app.js`)**:
   - `static/index.html`: Removed `disabled` attribute from the Data Preview and Visualizations tab buttons so users can inspect dataset rows and generate on-demand visual charts immediately upon upload without waiting for cleaning processing.

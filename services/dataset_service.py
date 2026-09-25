@@ -13,7 +13,7 @@ from flask import current_app
 
 from utils.session_manager import save_session, load_session
 from utils.upload_validator import validate_upload
-from utils.helpers import read_csv_robust
+from utils.helpers import read_csv_robust, safe_to_excel
 from services.cleaning import run_cleaning_engine, build_cleaning_plan, validate_plan
 
 
@@ -159,7 +159,7 @@ def process_cleaning_for_session(session_data, actions, sheet_name="Default"):
         session_id = session_data["session_id"]
         output_filename = f"cleaned_{session_id}.xlsx"
         output_path = os.path.join(current_app.config['OUTPUT_FOLDER'], output_filename)
-        df.to_excel(output_path, index=False)
+        safe_to_excel(df, output_path, index=False)
         logging.info("Cleaned dataset saved to %s", output_path)
 
         session_data["cleaned_filename"] = output_filename
@@ -243,7 +243,7 @@ def update_cell_value(session_data, row_idx, col_name, new_val):
 
         working_filename = f"edited_{file_id.split('.')[0]}.xlsx"
         working_path = os.path.join(current_app.config['OUTPUT_FOLDER'], working_filename)
-        df.to_excel(working_path, index=False)
+        safe_to_excel(df, working_path, index=False)
         session_data["cleaned_filename"] = working_filename
         session_data["preview"] = get_safe_preview(df, 10)
         save_session(session_data)

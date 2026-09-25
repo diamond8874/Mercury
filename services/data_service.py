@@ -5,7 +5,7 @@ import difflib
 import pandas as pd
 import numpy as np
 from utils.session_manager import load_session, save_session
-from utils.helpers import read_csv_robust
+from utils.helpers import read_csv_robust, safe_to_excel
 from utils.job_tracker import _set_job_state, _update_job_progress
 from services.cleaning import build_cleaning_plan, validate_plan, execute_plan, run_cleaning_engine
 
@@ -310,7 +310,7 @@ def run_background_process(app, session_id, api_key=None):
             _update_job_progress(session_id, 75, "Saving cleaned dataset output...")
             output_filename = f"cleaned_{session_id}.xlsx"
             output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
-            df.to_excel(output_path, index=False)
+            safe_to_excel(df, output_path, index=False)
             session_data["cleaned_filename"] = output_filename
             session_data["audit_log"] = audit_log
             session_data["quality_metrics"] = quality_metrics
