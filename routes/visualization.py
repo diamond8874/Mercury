@@ -9,6 +9,7 @@ from flask import Blueprint, request, jsonify, current_app
 
 from utils.auth import get_owned_session_or_404
 from utils.session_manager import save_session
+from utils.helpers import read_csv_robust
 from services.visualization_service import suggest_viz_params, render_dataset_chart
 
 visualization_bp = Blueprint('visualization', __name__)
@@ -71,7 +72,7 @@ def generate_custom_chart(session_id):
     try:
         sheet_name = session_data.get("sheet_name", "Default")
         if file_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
+            df = read_csv_robust(file_path)
         else:
             df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
     except Exception as e:

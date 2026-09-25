@@ -19,13 +19,14 @@ import zipfile
 from typing import Tuple, Optional
 
 import pandas as pd
+from utils.helpers import read_csv_robust
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configurable limits (environment-overridable)
 # ---------------------------------------------------------------------------
-MAX_ROWS: int = int(os.environ.get("MAX_ROWS", 200_000))
+MAX_ROWS: int = int(os.environ.get("MAX_ROWS", 2_000_000))
 MAX_COLS: int = int(os.environ.get("MAX_COLS", 500))
 MAX_XLSX_SHEETS: int = int(os.environ.get("MAX_XLSX_SHEETS", 10))
 # Decompression-bomb guard: reject xlsx whose *uncompressed* total size
@@ -151,7 +152,7 @@ def validate_upload(file_path: str, file_ext: str) -> Tuple[bool, Optional[str]]
                 nrows=MAX_ROWS + 1,
             )
         else:
-            df = pd.read_csv(file_path, nrows=MAX_ROWS + 1)
+            df = read_csv_robust(file_path, nrows=MAX_ROWS + 1)
 
         rows, cols = df.shape
         if rows > MAX_ROWS:

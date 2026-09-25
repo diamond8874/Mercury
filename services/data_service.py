@@ -5,6 +5,7 @@ import difflib
 import pandas as pd
 import numpy as np
 from utils.session_manager import load_session, save_session
+from utils.helpers import read_csv_robust
 from utils.job_tracker import _set_job_state, _update_job_progress
 from services.cleaning import build_cleaning_plan, validate_plan, execute_plan, run_cleaning_engine
 
@@ -296,7 +297,7 @@ def run_background_process(app, session_id, api_key=None):
             if file_ext in ['xlsx', 'xls']:
                 df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name not in ("Default", None) else 0)
             else:
-                df = pd.read_csv(file_path)
+                df = read_csv_robust(file_path)
 
             _update_job_progress(session_id, 35, "Running unified cleaning engine (Pydantic schema & transforms)...")
             

@@ -19,7 +19,7 @@ DATABASE_PATH = os.environ.get('DATABASE_PATH', os.path.join(os.getcwd(), 'users
 # ---------------------------------------------------------------------------
 # 4D: Upload content-validation caps (also read by utils/upload_validator.py)
 # ---------------------------------------------------------------------------
-MAX_ROWS: int = int(os.environ.get("MAX_ROWS", 200_000))
+MAX_ROWS: int = int(os.environ.get("MAX_ROWS", 2_000_000))
 MAX_COLS: int = int(os.environ.get("MAX_COLS", 500))
 MAX_XLSX_SHEETS: int = int(os.environ.get("MAX_XLSX_SHEETS", 10))
 MAX_UNCOMPRESSED_BYTES: int = int(

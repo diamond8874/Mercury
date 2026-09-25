@@ -16,6 +16,7 @@ from flask_login import current_user
 from utils.auth import get_owned_session_or_404
 from utils.url_validator import validate_base_url
 from utils.session_manager import load_session, save_session
+from utils.helpers import read_csv_robust
 from utils.job_tracker import submit_background_job
 from services.ai_service import get_llm_client
 from services.data_service import (
@@ -63,7 +64,7 @@ def _do_analyze(app, session_id, goal, api_key, sheet_name, provider, model, bas
             if file_ext in ['xlsx', 'xls']:
                 df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
             else:
-                df = pd.read_csv(file_path)
+                df = read_csv_robust(file_path)
 
             _upd(40, "Generating recommendations...")
             if is_mock:

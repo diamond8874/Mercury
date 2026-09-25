@@ -72,8 +72,9 @@ def get_session_detail(session_id):
             try:
                 import pandas as pd
                 from services.dataset_service import get_safe_preview
+                from utils.helpers import read_csv_robust
                 if out_path.endswith('.csv'):
-                    df_clean = pd.read_csv(out_path)
+                    df_clean = read_csv_robust(out_path)
                 else:
                     df_clean = pd.read_excel(out_path)
                 session_data["preview"] = get_safe_preview(df_clean, 10)

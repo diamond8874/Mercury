@@ -13,6 +13,7 @@ from flask import current_app
 
 from utils.session_manager import save_session, load_session
 from utils.upload_validator import validate_upload
+from utils.helpers import read_csv_robust
 from services.cleaning import run_cleaning_engine, build_cleaning_plan, validate_plan
 
 
@@ -57,7 +58,7 @@ def save_uploaded_file(file_storage, user_id=None):
             sheets = xls.sheet_names
             df = pd.read_excel(file_path, sheet_name=sheets[0])
         else:
-            df = pd.read_csv(file_path)
+            df = read_csv_robust(file_path)
             sheets = ["Default"]
 
         num_rows, num_cols = df.shape
@@ -145,7 +146,7 @@ def process_cleaning_for_session(session_data, actions, sheet_name="Default"):
         if file_ext in ['xlsx', 'xls']:
             df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
         else:
-            df = pd.read_csv(file_path)
+            df = read_csv_robust(file_path)
 
         session_data["column_actions"] = actions
 
@@ -217,7 +218,7 @@ def update_cell_value(session_data, row_idx, col_name, new_val):
         if file_ext in ['xlsx', 'xls']:
             df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name not in ("Default", None) else 0)
         else:
-            df = pd.read_csv(file_path)
+            df = read_csv_robust(file_path)
 
         row_i = int(row_idx)
         if col_name not in df.columns or not (0 <= row_i < len(df)):
@@ -271,7 +272,7 @@ def dry_run_plan(session_data, actions, sheet_name="Default"):
         if file_ext in ['xlsx', 'xls']:
             df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
         else:
-            df = pd.read_csv(file_path)
+            df = read_csv_robust(file_path)
 
         full_plan = []
         for col, col_data in actions.items():
