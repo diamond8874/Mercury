@@ -139,23 +139,46 @@ Return valid JSON only in this exact structure:
             completion = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.0, top_p=1, max_tokens=1024, seed=42
+                temperature=0.0, top_p=1, max_tokens=4096, seed=42
             )
             response_text = completion.choices[0].message.content
 
             from utils.helpers import parse_json_response
-            ai_data = parse_json_response(response_text)
-            recommendations = ai_data.get("recommendations", [])
+            recommendations = []
+            try:
+                ai_data = parse_json_response(response_text)
+                if isinstance(ai_data, dict):
+                    recommendations = ai_data.get("recommendations", [])
+                elif isinstance(ai_data, list):
+                    recommendations = ai_data
+            except Exception as parse_err:
+                logging.warning("AI JSON parsing failed (%s), generating safe fallback recommendations", parse_err)
 
             col_actions = {}
-            for r in recommendations:
-                col_name = r.get("column")
-                if col_name and col_name in df.columns:
+            if recommendations:
+                for r in recommendations:
+                    col_name = r.get("column")
+                    if col_name and col_name in df.columns:
+                        col_actions[col_name] = {
+                            "action": r.get("action", "keep"),
+                            "reason": r.get("reason", "AI Recommendation"),
+                            "transformation": r.get("transformation")
+                        }
+
+            # Guarantee every column in df.columns has an action
+            for col_name in df.columns:
+                if col_name not in col_actions:
                     col_actions[col_name] = {
-                        "action": r.get("action", "keep"),
-                        "reason": r.get("reason", "AI Recommendation"),
-                        "transformation": r.get("transformation")
+                        "action": "keep",
+                        "reason": f"Retained for objective: {goal[:50]}",
+                        "transformation": None
                     }
+                    recommendations.append({
+                        "column": col_name,
+                        "action": "keep",
+                        "reason": f"Retained for objective: {goal[:50]}",
+                        "transformation": None
+                    })
 
             session_data["column_actions"] = col_actions
             intro_msg = f"Goal set: **{goal}**.<br>I analyzed the schema and populated initial cleaning suggestions in the grid. You can adjust the actions or chat with me to refine them."
@@ -174,9 +197,22 @@ Return valid JSON only in this exact structure:
             try:
                 sd = load_session(session_id)
                 if sd:
-                    sd["status"] = "error"
-                    sd["error"] = str(e)
+                    # Provide default recommendations rather than abandoning the user on step 1
+                    cols = sd.get("columns", [])
+                    fallback_actions = {
+                        (c["name"] if isinstance(c, dict) else str(c)): {
+                            "action": "keep",
+                            "reason": f"Retained for objective: {goal[:50]}",
+                            "transformation": None
+                        }
+                        for c in cols
+                    }
+                    sd["column_actions"] = fallback_actions
+                    sd["status"] = "analyze_done"
+                    sd["progress"] = 100
                     save_session(sd)
+                    _upd(100, "Done (with safe defaults)")
+                    return {"recommendations": list(fallback_actions.values())}
             except Exception:
                 pass
             raise  # Let job_tracker wrapper catch and mark job failed

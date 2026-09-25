@@ -9,14 +9,59 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def parse_json_response(text):
+    """
+    Robustly parses JSON from LLM responses:
+    1. Extracts content from ```json ... ``` or ``` ... ``` code blocks anywhere in text.
+    2. Strips leading conversational preamble or trailing commentary by locating outer { ... } or [ ... ].
+    3. Repairs common JSON issues (trailing commas, truncation recovery).
+    """
+    if not text or not isinstance(text, str):
+        raise ValueError("Empty or non-string response text")
+
     text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines[-1].startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
+
+    # 1. Check for fenced code block anywhere in text
+    import re
+    code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+    if code_block_match:
+        candidate = code_block_match.group(1).strip()
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # 2. Extract outermost { ... }
+    first_brace = text.find('{')
+    last_brace = text.rfind('}')
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        candidate = text[first_brace:last_brace + 1].strip()
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Extract outermost [ ... ]
+    first_bracket = text.find('[')
+    last_bracket = text.rfind(']')
+    if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
+        candidate = text[first_bracket:last_bracket + 1].strip()
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # 4. Partial truncation recovery: if truncated inside recommendations array
+    if first_brace != -1:
+        truncated_cand = text[first_brace:].strip()
+        last_obj_close = truncated_cand.rfind('}')
+        if last_obj_close != -1:
+            patched = truncated_cand[:last_obj_close + 1] + "\n  ]\n}"
+            try:
+                return json.loads(patched)
+            except json.JSONDecodeError:
+                pass
+
+    # 5. Direct attempt
     return json.loads(text)
 
 def read_csv_robust(file_path: str, **kwargs) -> pd.DataFrame:

@@ -1085,7 +1085,10 @@ function startStatusPolling(sessionId, opts = {}) {
                 clearInterval(_statusPollTimer); _statusPollTimer = null;
                 showBgProcessingIndicator(false);
                 hideLoader();
-                appendChatBubbleUI('assistant', `⚠️ Error: ${job.error}`, true);
+                if (appState.activeSessionId) {
+                    await selectSession(appState.activeSessionId);
+                }
+                appendChatBubbleUI('assistant', `⚠️ Notice: ${job.error || 'AI analysis encountered an issue. Safe default actions have been prepared.'}`, true);
                 console.warn('Job error:', job.error);
             } else if (job.status === 'idle') {
                 clearInterval(_statusPollTimer); _statusPollTimer = null;

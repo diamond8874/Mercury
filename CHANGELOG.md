@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+- **Fix AI Analysis Truncation Crash, JSON Parsing Resilience & jsdelivr CSP (`app.py`, `utils/helpers.py`, `routes/cleaning.py`, `static/app.js`)**:
+  - `app.py`: Added `https://cdn.jsdelivr.net` to the Content Security Policy `connect-src` directive, eliminating CSP source map blocking errors (`chart.umd.min.js.map`).
+  - `routes/cleaning.py`: Increased LLM `max_tokens` from 1,024 to 4,096 in `_do_analyze()`. Previously, datasets with many columns (e.g. 35+ columns in `alzheimers_disease_data.csv`) exceeded the 1,024 token limit mid-generation, throwing `JSONDecodeError: Unterminated string starting at: line 19 column 17 (char 464)`.
+  - `utils/helpers.py`: Upgraded `parse_json_response()` with multi-stage recovery: extracts fenced markdown blocks anywhere in text, strips conversational preambles/postscripts, and repairs truncated JSON objects (`]}`).
+  - `routes/cleaning.py`: Added guaranteed fallback recommendations defaulting all columns to KEEP if an external LLM fails, ensuring sessions always transition to `analyze_done` rather than crashing into `status: "error"`.
+  - `static/app.js`: Updated `startStatusPolling()` to ensure `selectSession()` is called to transition the user to the split dashboard rather than leaving them stranded on Step 1.
+
 - **15-Row Data Preview, Before/After Toggle & Applied Changes Card (`models/__init__.py`, `repositories/session_repository.py`, `services/dataset_service.py`, `routes/sessions.py`, `static/index.html`, `static/style.css`, `static/app.js`)**:
   - `models/__init__.py`: Added `raw_preview` JSON column to `SessionModel` and automatic SQLite schema migration in `init_db()` (`ALTER TABLE sessions ADD COLUMN raw_preview TEXT`).
   - `repositories/session_repository.py`: Added `raw_preview` support across session creation and optimistic lock update branches in `save()`.
