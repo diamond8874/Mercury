@@ -170,6 +170,14 @@ def process_cleaning_for_session(session_data, actions, sheet_name="Default"):
         session_data["charts"] = []
 
         preview_data = get_safe_preview(df, 10)
+        session_data["preview"] = preview_data
+        session_data["bg_result"] = {
+            "preview": preview_data,
+            "stats": stats,
+            "charts": [],
+            "quality_metrics": quality_metrics,
+            "download_url": f"/api/download/{output_filename}"
+        }
         confirm_msg = (
             f"Excellent! I've clean-processed the dataset using the unified cleaning engine. "
             f"It has {df.shape[0]} rows and {df.shape[1]} columns. You can download the clean file or view diagnostics in the report."
@@ -236,6 +244,7 @@ def update_cell_value(session_data, row_idx, col_name, new_val):
         working_path = os.path.join(current_app.config['OUTPUT_FOLDER'], working_filename)
         df.to_excel(working_path, index=False)
         session_data["cleaned_filename"] = working_filename
+        session_data["preview"] = get_safe_preview(df, 10)
         save_session(session_data)
 
         return {

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Increase Dataset Upload Limit to 200MB (`config.py`, `app.py`, `static/index.html`, `.env`)**:
+  - `config.py`: Raised `MAX_CONTENT_LENGTH` default to 200MB (`200 * 1024 * 1024` bytes) with environment variable override support, and raised per-user storage quota `MAX_STORAGE_BYTES_PER_USER` to 1GB (`1024 * 1024 * 1024` bytes) and `MAX_UNCOMPRESSED_BYTES` to 500MB to accommodate large files.
+  - `app.py`: Updated the `413 RequestEntityTooLarge` error handler to dynamically calculate and report the exact configured limit in MB (`File size exceeds maximum allowed upload limit ({max_mb}MB)`).
+  - `static/index.html`: Updated upload drop-zone subtitle to `"Supports .xlsx, .xls and .csv (Max 200MB)"`.
+  - `.env`: Added `MAX_CONTENT_LENGTH=209715200` and `MAX_STORAGE_BYTES_PER_USER=1073741824`.
+  - `tests/test_phase4e_comprehensive.py`: Updated oversized upload test to dynamically test beyond configured `MAX_CONTENT_LENGTH`.
+
+- **Custom LLM Provider Keys, Prompt Reprocess Preview & Session Persistence (`services/ai_service.py`, `services/dataset_service.py`, `routes/sessions.py`, `static/app.js`)**:
+  - `services/ai_service.py`: Fixed aggressive fallback logic in `resolve_config()` that was forcibly redirecting custom user NVIDIA configurations and models to Groq. Users providing custom keys or explicitly selecting NVIDIA or other providers now route directly to their selected provider and target endpoints without being overwritten. Installed missing `tenacity` library in environment for LiteLLM retry handling.
+  - `services/dataset_service.py`: Added explicit persistence for `session_data["preview"]` and `session_data["bg_result"]` in `process_cleaning_for_session` and `update_cell_value` before `save_session()`.
+  - `routes/sessions.py`: Ensured `get_session_detail` dynamically reads and generates safe previews from `cleaned_<session_id>.xlsx` if present on disk, guaranteeing that sessions always display the latest cleaned data preview when a user logs in or switches sessions.
+  - `static/app.js`: In `executePandasProcess()`, guaranteed that `data.preview` is immediately rendered to the preview table and automatically switches the active tab to `tab-preview` so the user immediately sees transformation results (such as rounded numbers) reflected in the grid.
+  - Full test suite passes 100% (107/107 tests).
+
 - **Geo Map Visual Fix & Mercury Branding (`powerbi_visuals/geo_charts.py`, `static/index.html`, `static/app.js`)**:
   - `powerbi_visuals/geo_charts.py`: Fixed `Could not convert string ... to numeric` and Folium's `"Make this Notebook Trusted to load map: File -> Trust Notebook"` display issue. Folium's `_repr_html_()` produces a Jupyter-only wrapper that breaks in standard web browsers when injected into DOM; replaced with `m.get_root().render()` wrapped in a responsive `<iframe srcdoc="...">` with `width: 100%` and `height: 420px`.
   - Implemented safe numeric coercion (`pd.to_numeric(..., errors='coerce')`) for latitude and longitude columns with coordinate column auto-inference, graceful informative overlay when non-coordinate columns are passed, and switched base tiles to OpenStreetMap.

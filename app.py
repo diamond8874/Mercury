@@ -115,9 +115,10 @@ def set_security_headers(response):
 @app.errorhandler(413)
 @app.errorhandler(RequestEntityTooLarge)
 def handle_file_too_large(e):
+    max_mb = (app.config.get('MAX_CONTENT_LENGTH') or config.MAX_CONTENT_LENGTH) // (1024 * 1024)
     return jsonify({
         "status": "error",
-        "error": "File size exceeds maximum allowed upload limit (16MB)."
+        "error": f"File size exceeds maximum allowed upload limit ({max_mb}MB)."
     }), 413
 
 # 4D §2: Rate-limit 429 handler

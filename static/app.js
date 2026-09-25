@@ -1310,7 +1310,10 @@ async function executePandasProcess() {
         // Reload details state
         await selectSession(appState.activeSessionId);
         
-        // Switch to preview tab
+        // Explicitly guarantee the new cleaned preview is rendered in the table and switch tab
+        if (data.preview && data.preview.length > 0) {
+            renderTablePreview(data.preview);
+        }
         switchToTab('tab-preview');
 
         appendChatBubbleUI('assistant', '✅ Data cleaning is complete. Ask me what visualization you want next, and I will prepare it for you.', true);

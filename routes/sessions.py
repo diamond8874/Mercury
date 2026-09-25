@@ -63,6 +63,25 @@ def get_session_detail(session_id):
     session_data, err_resp = get_owned_session_or_404(session_id)
     if err_resp:
         return err_resp
+
+    # Ensure preview reflects the cleaned dataset if already processed
+    cleaned_file = session_data.get("cleaned_filename")
+    if cleaned_file:
+        out_path = os.path.join(current_app.config['OUTPUT_FOLDER'], cleaned_file)
+        if os.path.exists(out_path):
+            try:
+                import pandas as pd
+                from services.dataset_service import get_safe_preview
+                if out_path.endswith('.csv'):
+                    df_clean = pd.read_csv(out_path)
+                else:
+                    df_clean = pd.read_excel(out_path)
+                session_data["preview"] = get_safe_preview(df_clean, 10)
+                session_data["row_count"] = len(df_clean)
+                session_data["col_count"] = len(df_clean.columns)
+            except Exception as e:
+                logging.warning("Could not refresh preview from cleaned file %s: %s", cleaned_file, e)
+
     return jsonify(session_data), 200
 
 

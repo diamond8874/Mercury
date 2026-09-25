@@ -305,7 +305,8 @@ def test_api_key_never_in_logs_or_session_json(client, caplog):
 # ---------------------------------------------------------------------------
 def test_oversized_upload_and_shape_caps(client, monkeypatch):
     # Oversized upload exceeding MAX_CONTENT_LENGTH -> 413
-    huge_data = b"x" * (17 * 1024 * 1024)  # 17MB exceeds 16MB limit
+    curr_limit = client.application.config.get('MAX_CONTENT_LENGTH', 200 * 1024 * 1024)
+    huge_data = b"x" * (curr_limit + 1024 * 1024)  # Exceeds limit
     resp_413 = client.post(
         "/api/upload",
         data={"file": (io.BytesIO(huge_data), "huge.csv")},

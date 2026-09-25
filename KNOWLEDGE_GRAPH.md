@@ -104,9 +104,10 @@ The LLM abstraction dynamically routes API calls. It checks settings sent from t
 | `MAX_ROWS` | Upload Limits | Maximum allowed rows in an uploaded file (default: 200,000). |
 | `MAX_COLS` | Upload Limits | Maximum allowed columns in an uploaded file (default: 500). |
 | `MAX_XLSX_SHEETS` | Upload Limits | Maximum allowed sheets in an Excel workbook (default: 10). |
-| `MAX_UNCOMPRESSED_BYTES` | Upload Limits | Maximum uncompressed size for zipped Excel files / bomb protection (default: 200MB). |
+| `MAX_CONTENT_LENGTH` | Upload Limits | Maximum HTTP upload payload in bytes (default: 200MB / 209715200 bytes). |
+| `MAX_UNCOMPRESSED_BYTES` | Upload Limits | Maximum uncompressed size for zipped Excel files / bomb protection (default: 500MB). |
 | `MAX_SESSIONS_PER_USER` | Quotas | Maximum active sessions per authenticated user (default: 20). |
-| `MAX_STORAGE_BYTES_PER_USER` | Quotas | Maximum disk storage in bytes per user (default: 500MB). |
+| `MAX_STORAGE_BYTES_PER_USER` | Quotas | Maximum disk storage in bytes per user (default: 1GB / 1073741824 bytes). |
 | `SESSION_TTL_SECONDS` | Cleanup | Session inactivity time-to-live before automatic deletion (default: 86400s / 24h). |
 | `CLEANUP_INTERVAL_SECONDS` | Cleanup | Interval in seconds between background cleanup sweep runs (default: 3600s / 1h). |
 | `RATELIMIT_STORAGE_URI` | Rate Limiter | Storage backend URI for Flask-Limiter (default: `memory://`). |

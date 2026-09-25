@@ -11,7 +11,7 @@ SESSION_FOLDER = os.path.join(os.getcwd(), 'sessions')
 
 # File Upload Restrictions
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max upload size
+MAX_CONTENT_LENGTH = int(os.environ.get('MAX_CONTENT_LENGTH', 200 * 1024 * 1024))  # 200MB max upload size
 
 # Database Configuration
 DATABASE_PATH = os.environ.get('DATABASE_PATH', os.path.join(os.getcwd(), 'users.db'))
@@ -23,13 +23,13 @@ MAX_ROWS: int = int(os.environ.get("MAX_ROWS", 200_000))
 MAX_COLS: int = int(os.environ.get("MAX_COLS", 500))
 MAX_XLSX_SHEETS: int = int(os.environ.get("MAX_XLSX_SHEETS", 10))
 MAX_UNCOMPRESSED_BYTES: int = int(
-    os.environ.get("MAX_UNCOMPRESSED_BYTES", 200 * 1024 * 1024)  # 200 MB
+    os.environ.get("MAX_UNCOMPRESSED_BYTES", 500 * 1024 * 1024)  # 500 MB guard
 )
 
 # 4D: Per-user quotas
 MAX_SESSIONS_PER_USER: int = int(os.environ.get("MAX_SESSIONS_PER_USER", 20))
 MAX_STORAGE_BYTES_PER_USER: int = int(
-    os.environ.get("MAX_STORAGE_BYTES_PER_USER", 500 * 1024 * 1024)  # 500 MB
+    os.environ.get("MAX_STORAGE_BYTES_PER_USER", 1024 * 1024 * 1024)  # 1 GB
 )
 
 # 4D: Cleanup / TTL

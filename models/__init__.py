@@ -299,6 +299,21 @@ def get_session_factory(db_path: Optional[str] = None):
     return factory
 
 def init_db(db_path: Optional[str] = None):
-    """Creates all tables if they do not already exist."""
+    """Creates all tables if they do not already exist, and migrates missing columns."""
     engine = get_engine(db_path)
     Base.metadata.create_all(engine)
+
+    # Lightweight SQLite column migration for existing tables
+    try:
+        with engine.connect() as conn:
+            cursor = conn.connection.cursor()
+            existing_cols = [r[1] for r in cursor.execute("PRAGMA table_info(jobs)").fetchall()]
+            if 'user_id' not in existing_cols:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN user_id VARCHAR(36)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS ix_jobs_user_id ON jobs (user_id)")
+            if 'timeout_seconds' not in existing_cols:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN timeout_seconds INTEGER DEFAULT 300 NOT NULL")
+            conn.connection.commit()
+            cursor.close()
+    except Exception as e:
+        logging.warning("jobs schema column sync note: %s", e)

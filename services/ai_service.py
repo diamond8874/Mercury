@@ -72,32 +72,36 @@ class UnifiedLLMClient:
         """
         Determines the correct provider, model identifier, API key, and base URL.
         """
-        # Sanitize self.model for stale/deprecated UI localStorage values first
-        _deprecated_nvidia_tokens = [
-            "llama-3.3-70b", "llama-3.1-70b", "llama-3.3-70b-instruct",
-            "llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct",
-            "meta/llama-3.1-70b-instruct", "nemotron", "llama-3.1-nemotron",
-            "nvidia/llama", "glm-5.2"
-        ]
-        _groq_fallback = "groq/openai/gpt-oss-120b"
-        for _tok in _deprecated_nvidia_tokens:
-            if self.model and _tok in (self.model or "").lower():
-                self.model = _groq_fallback
-                self.provider = "groq"
-                break
-        # Also redirect if provider is nvidia but no valid NVIDIA key is set
-        if (self.provider or "").lower() == "nvidia" and not (self.api_key or "").startswith("nvapi-"):
-            if os.environ.get("GROQ_API_KEY"):
-                self.provider = "groq"
-                if not (self.model or "").startswith("groq/"):
+        # Check if the user explicitly provided their own key or provider
+        has_custom_key = bool(self.api_key and str(self.api_key).strip())
+        is_user_nvidia = (self.provider or "").lower() == "nvidia" or (self.api_key or "").startswith("nvapi-")
+
+        # Fallback sanitize ONLY if user did not provide an explicit key/nvidia provider
+        if not has_custom_key and not is_user_nvidia:
+            _deprecated_nvidia_tokens = [
+                "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192", "llama3-8b-8192"
+            ]
+            _groq_fallback = "groq/openai/gpt-oss-120b"
+            for _tok in _deprecated_nvidia_tokens:
+                if self.model and _tok in (self.model or "").lower():
                     self.model = _groq_fallback
+                    self.provider = "groq"
+                    break
+            # Also redirect if provider is nvidia but no valid key is set anywhere
+            if (self.provider or "").lower() == "nvidia" and not os.environ.get("NVIDIA_API_KEY"):
+                if os.environ.get("GROQ_API_KEY"):
+                    self.provider = "groq"
+                    if not (self.model or "").startswith("groq/"):
+                        self.model = _groq_fallback
 
         # Resolve target model name
         model_name = requested_model or self.model or os.environ.get("LLM_MODEL")
         
         # If no model is explicitly requested, auto-select based on available API keys
         if not model_name or model_name.strip() == "":
-            if os.environ.get("GROQ_API_KEY"):
+            if (self.provider or "").lower() == "nvidia" or (self.api_key or "").startswith("nvapi-") or os.environ.get("NVIDIA_API_KEY"):
+                model_name = "z-ai/glm-5.2"
+            elif os.environ.get("GROQ_API_KEY"):
                 model_name = "groq/openai/gpt-oss-120b"
             elif os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
                 model_name = "gemini-2.5-flash"
@@ -108,16 +112,10 @@ class UnifiedLLMClient:
             else:
                 model_name = "groq/openai/gpt-oss-120b"
 
-        # Replace deprecated/end-of-life models globally
-        deprecated_groq = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it", "llama-3.3-70b-specdec"]
-        if any(tok in model_name for tok in deprecated_groq):
-            model_name = "groq/openai/gpt-oss-120b"
-
-        deprecated_tokens = ["llama-3.3-70b", "llama-3.1-70b", "llama-3.3-70b-instruct", "llama-3.1-70b-instruct", "meta/llama-3.3-70b-instruct", "meta/llama-3.1-70b-instruct", "nemotron"]
-        if any(tok in model_name for tok in deprecated_tokens) and not model_name.startswith("groq/"):
-            if os.environ.get("GROQ_API_KEY"):
-                model_name = "groq/openai/gpt-oss-120b"
-            else:
+        # Replace deprecated/end-of-life models for Groq only if user is using Groq
+        if (self.provider or "").lower() == "groq" or model_name.startswith("groq/"):
+            deprecated_groq = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it", "llama-3.3-70b-specdec"]
+            if any(tok in model_name for tok in deprecated_groq):
                 model_name = "groq/openai/gpt-oss-120b"
 
         model_lower = model_name.lower()
@@ -218,7 +216,7 @@ class UnifiedLLMClient:
             if not base_url:
                 base_url = "https://integrate.api.nvidia.com/v1"
             
-            clean_name = model_name.replace("openai/", "")
+            clean_name = model_name.replace("openai/", "").replace("nvidia/", "")
             model_mapping = {
                 "nemotron": "nvidia/llama-3.1-nemotron-70b-instruct",
                 "nemotron-3.5-lightning": "nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -232,7 +230,8 @@ class UnifiedLLMClient:
                 "glm-5.2": "z-ai/glm-5.2"
             }
 
-            mapped_name = model_mapping.get(clean_name.lower(), clean_name)
+            raw_lower = clean_name.lower().strip()
+            mapped_name = model_mapping.get(raw_lower, model_name.replace("openai/", ""))
             model_name = f"openai/{mapped_name}"
 
         elif provider == "groq":
