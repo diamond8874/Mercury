@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Setup & Integration of Ponytail (`.agents/skills/`, `.agents/mcp/`, `.agents/hooks/`, `.gitignore`)**:
+  - Created and checked out new branch `setup-ponytail`.
+  - Integrated Ponytail (v4.10.0 from `https://github.com/dietrichgebert/ponytail`) lazy senior developer framework.
+  - Installed native workspace skills into `.agents/skills/`: `ponytail`, `ponytail-review`, `ponytail-audit`, `ponytail-debt`, `ponytail-gain`, `ponytail-help`.
+  - Installed and verified Ponytail MCP server into `.agents/mcp/` (`@modelcontextprotocol/sdk`, `zod`), passing instruction verification suite (`node --test ./test/instructions.test.js`).
+  - Added hooks and runtime scripts in `.agents/hooks/`.
+  - Added `.agents/mcp/node_modules/` to `.gitignore`.
+  - Ran Ponytail commands (`ponytail-debt`, `ponytail-audit`) against the repository.
+
 - **Increase Dataset Upload Limit to 200MB (`config.py`, `app.py`, `static/index.html`, `.env`)**:
   - `config.py`: Raised `MAX_CONTENT_LENGTH` default to 200MB (`200 * 1024 * 1024` bytes) with environment variable override support, and raised per-user storage quota `MAX_STORAGE_BYTES_PER_USER` to 1GB (`1024 * 1024 * 1024` bytes) and `MAX_UNCOMPRESSED_BYTES` to 500MB to accommodate large files.
   - `app.py`: Updated the `413 RequestEntityTooLarge` error handler to dynamically calculate and report the exact configured limit in MB (`File size exceeds maximum allowed upload limit ({max_mb}MB)`).

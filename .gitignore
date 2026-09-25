@@ -12,3 +12,4 @@ test_output_data/
 *.db-shm
 *.db-wal
 data/
+.agents/mcp/node_modules/
