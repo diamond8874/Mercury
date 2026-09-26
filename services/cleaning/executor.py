@@ -234,6 +234,16 @@ def _handle_drop_duplicates_by_columns(df: pd.DataFrame, col: str, params: dict)
     return df, f"Removed {removed} duplicate rows based on {subset_desc} (keep='{keep}')."
 
 
+def _handle_sort_ascending(df: pd.DataFrame, col: str, params: dict) -> tuple:
+    df = df.sort_values(by=col, ascending=True).reset_index(drop=True)
+    return df, f"Sorted dataset in ascending order by '{col}'."
+
+
+def _handle_sort_descending(df: pd.DataFrame, col: str, params: dict) -> tuple:
+    df = df.sort_values(by=col, ascending=False).reset_index(drop=True)
+    return df, f"Sorted dataset in descending order by '{col}'."
+
+
 def _handle_uppercase(df: pd.DataFrame, col: str, params: dict) -> tuple:
     df.loc[:, col] = df[col].astype(str).str.upper()
     return df, f"Converted '{col}' to uppercase."
@@ -619,6 +629,24 @@ def _handle_extract_weekend(df: pd.DataFrame, col: str, params: dict) -> tuple:
     return df, f"Created is_weekend feature from '{col}'."
 
 
+def _handle_calculate_age(df: pd.DataFrame, col: str, params: dict) -> tuple:
+    dt = _safe_to_datetime(df[col])
+    now = pd.Timestamp.now()
+    df.loc[:, col] = dt.apply(lambda x: int((now - x).days / 365.25) if pd.notna(x) else np.nan)
+    return df, f"Calculated age in years from '{col}'."
+
+
+def _handle_anonymize_text(df: pd.DataFrame, col: str, params: dict) -> tuple:
+    import hashlib
+    def hash_val(v):
+        if pd.isna(v) or str(v).strip() == '':
+            return np.nan
+        return "ID_" + hashlib.md5(str(v).encode('utf-8')).hexdigest()[:8].upper()
+    df.loc[:, col] = df[col].apply(hash_val)
+    return df, f"Anonymized text in '{col}' using MD5 hash."
+
+
+
 def _handle_days_since(df: pd.DataFrame, col: str, params: dict) -> tuple:
     dt = _safe_to_datetime(df[col])
     now = pd.Timestamp.now()
@@ -844,6 +872,10 @@ _HANDLERS = {
     "remove_rows":                  _handle_remove_rows,
     "explode_column":               _handle_explode_column,
     "bin_column":                   _handle_bin_column,
+    "sort_ascending":               _handle_sort_ascending,
+    "sort_descending":              _handle_sort_descending,
+    "calculate_age":                _handle_calculate_age,
+    "anonymize_text":               _handle_anonymize_text,
 }
 
 

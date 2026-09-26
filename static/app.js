@@ -141,11 +141,11 @@ const els = {
 
 // Colors for Chart.js
 const chartColors = {
-    primary: '#6366f1',
-    primaryAlpha: 'rgba(99, 102, 241, 0.15)',
-    accent: '#a855f7',
-    success: '#10b981',
-    palette: ['#6366f1', '#a855f7', '#10b981', '#f59e0b', '#3b82f6', '#ec4899', '#14b8a6']
+    primary: '#4f9bb5',
+    primaryAlpha: 'rgba(79, 155, 181, 0.18)',
+    accent: '#df9653',
+    success: '#70b38d',
+    palette: ['#4f9bb5', '#df9653', '#70b38d', '#c96f75', '#8299c2', '#ad8665', '#68a5a0']
 };
 
 // Start application hook
@@ -742,7 +742,10 @@ function initGoalPresets() {
         btn.addEventListener('click', () => {
             const val = btn.getAttribute('data-goal');
             els.goalInput.value = val;
-            els.analyzeDataBtn.disabled = !(appState.activeSessionId);
+            if (appState.activeSessionId) {
+                els.analyzeDataBtn.disabled = false;
+                els.analyzeDataBtn.click();
+            }
         });
     });
 }
@@ -1345,7 +1348,30 @@ async function executePandasProcess() {
         }
         switchToTab('tab-preview');
 
-        appendChatBubbleUI('assistant', '✅ Data cleaning is complete. Ask me what visualization you want next, and I will prepare it for you.', true);
+        let successMessages = [];
+        let errorMessages = [];
+        if (data.audit_log && data.audit_log.length > 0) {
+            data.audit_log.forEach(log => {
+                if (log.status === "error") {
+                    errorMessages.push(`- **${log.column || 'Dataset'}:** ${log.message}`);
+                } else if (log.status === "success" && log.operation !== "keep_column" && !log.message.includes("No change")) {
+                    successMessages.push(`- **${log.column || 'Dataset'}:** ${log.message}`);
+                }
+            });
+        }
+        
+        let msg = '✅ Data cleaning is complete. Ask me what visualization you want next, and I will prepare it for you.';
+        if (successMessages.length > 0) {
+            msg += `\n\n**Applied Changes:**\n${successMessages.join('\n')}`;
+        }
+        if (errorMessages.length > 0) {
+            msg += `\n\n**Failed to Update:**\n${errorMessages.join('\n')}`;
+        }
+        if (successMessages.length === 0 && errorMessages.length === 0) {
+            msg += '\n\nNo data changes were applied.';
+        }
+
+        appendChatBubbleUI('assistant', msg, true);
         
     } catch (err) {
         console.error(err);
@@ -1614,19 +1640,16 @@ function renderAppliedChangesCard() {
 function renderCharts(chartsData) {
     const grid = els.dashboardChartsGrid;
     grid.innerHTML = '';
+    grid.classList.toggle('is-chart-grid', Array.isArray(chartsData) && chartsData.length > 1);
     
     if (!chartsData || chartsData.length === 0) {
-        grid.innerHTML = `
-            <div class="glass-card chart-card" style="grid-column: 1 / -1; height: 180px; align-items: center; justify-content: center;">
-                <p class="text-muted"><i class="fa-solid fa-chart-bar" style="font-size: 2rem; margin-bottom: 0.5rem;"></i><br>No charts generated. AI visualization recommendations are empty.</p>
-            </div>
-        `;
+        grid.innerHTML = '<div class="bi-placeholder"><span class="bi-placeholder-icon"><i class="fa-solid fa-chart-simple"></i></span><p class="viz-eyebrow">CHART WORKSPACE</p><h3>No suggested charts yet.</h3><p>Choose a visual from the gallery to begin.</p></div>';
         return;
     }
     
     chartsData.forEach((chart, index) => {
         const card = document.createElement('div');
-        card.className = 'glass-card chart-card';
+        card.className = 'chart-card recommended-chart-card';
         
         const canvasId = `chart-canvas-${index}`;
         // Build chart card safely
@@ -1651,6 +1674,39 @@ function renderCharts(chartsData) {
         try {
             const ctx = document.getElementById(canvasId).getContext('2d');
             let config = {};
+            const chartBaseOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: { padding: { top: 8, right: 12, bottom: 4, left: 4 } },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(12, 18, 28, 0.96)',
+                        borderColor: 'rgba(255, 255, 255, 0.12)',
+                        borderWidth: 1,
+                        titleColor: '#f1f5f9',
+                        bodyColor: '#bdc8d6',
+                        padding: 11,
+                        cornerRadius: 5,
+                        displayColors: true
+                    }
+                }
+            };
+            const axisOptions = {
+                x: {
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: { color: '#c0cad7', font: { family: 'Plus Jakarta Sans', size: 11 }, maxRotation: 0 }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(210, 222, 236, 0.12)', drawTicks: false },
+                    border: { display: false },
+                    ticks: { color: '#b2bece', padding: 9, font: { family: 'Plus Jakarta Sans', size: 11 } }
+                }
+            };
+            const isCircular = ['pie', 'donut', 'doughnut'].includes(chart.chart_type);
+            const chartType = chart.chart_type === 'donut' ? 'doughnut' : chart.chart_type;
             
             if (chart.chart_type === 'scatter') {
                 config = {
@@ -1661,44 +1717,56 @@ function renderCharts(chartsData) {
                             data: chart.points,
                             backgroundColor: chartColors.primary,
                             borderColor: chartColors.primary,
-                            pointRadius: 5
+                            pointRadius: 3,
+                            pointHoverRadius: 6
                         }]
                     },
                     options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
+                        ...chartBaseOptions,
                         scales: {
-                            x: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } },
-                            y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
+                            x: { ...axisOptions.x, grid: { color: 'rgba(210, 222, 236, 0.08)' } },
+                            y: axisOptions.y
                         }
                     }
                 };
-            } else if (chart.chart_type === 'pie') {
+            } else if (isCircular) {
+                const isDonut = chartType === 'doughnut';
                 config = {
-                    type: 'pie',
+                    type: chartType,
                     data: {
                         labels: chart.labels,
                         datasets: [{
                             data: chart.values,
                             backgroundColor: chartColors.palette,
-                            borderWidth: 1,
-                            borderColor: 'rgba(255, 255, 255, 0.1)'
+                            borderWidth: 2,
+                            borderColor: '#111a29',
+                            hoverOffset: 7
                         }]
                     },
                     options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
+                        ...chartBaseOptions,
+                        cutout: isDonut ? '62%' : 0,
                         plugins: {
+                            ...chartBaseOptions.plugins,
                             legend: {
-                                position: 'right',
-                                labels: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 9 } }
+                                display: true,
+                                position: 'bottom',
+                                labels: {
+                                    color: '#b4bfce',
+                                    usePointStyle: true,
+                                    pointStyle: 'circle',
+                                    boxWidth: 7,
+                                    boxHeight: 7,
+                                    padding: 14,
+                                    font: { family: 'Plus Jakarta Sans', size: 10 }
+                                }
                             }
                         }
                     }
                 };
             } else {
                 const isLine = chart.chart_type === 'line';
+                const seriesColor = chartColors.primary;
                 config = {
                     type: isLine ? 'line' : 'bar',
                     data: {
@@ -1706,21 +1774,20 @@ function renderCharts(chartsData) {
                         datasets: [{
                             label: chart.y_axis || 'Frequency',
                             data: chart.values,
-                            backgroundColor: isLine ? chartColors.primaryAlpha : chartColors.palette[index % chartColors.palette.length],
-                            borderColor: chartColors.primary,
-                            borderWidth: 2,
+                            backgroundColor: isLine ? chartColors.primaryAlpha : seriesColor,
+                            borderColor: seriesColor,
+                            borderWidth: isLine ? 2.5 : 0,
                             fill: isLine,
-                            tension: 0.35
+                            tension: 0.24,
+                            pointRadius: isLine ? 2 : 0,
+                            pointHoverRadius: 5,
+                            borderRadius: isLine ? 0 : 3,
+                            maxBarThickness: 42
                         }]
                     },
                     options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: {
-                            x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 8 } } },
-                            y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#94a3b8' } }
-                        }
+                        ...chartBaseOptions,
+                        scales: axisOptions
                     }
                 };
             }
@@ -2066,23 +2133,21 @@ function initPowerBIBuilder() {
 
     // Helper: Execute custom_chart API and display chart with "Add to Report" pinning
     async function renderCustomVisual(params) {
-        // Build loading spinner safely (no user content in spinner)
+        appState.chartInstances.forEach(chart => chart.destroy());
+        appState.chartInstances = [];
         canvas.innerHTML = '';
-        const spinner = document.createElement('div');
-        spinner.className = 'progress-container';
-        spinner.style.cssText = 'width:80%;max-width:400px;text-align:center;margin:auto;padding-top:15%';
-        const spinH = document.createElement('h4');
-        spinH.style.cssText = 'margin-bottom:12px;color:var(--text-muted);font-weight:normal';
-        spinH.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> '; // icon only
-        spinH.appendChild(document.createTextNode(`Rendering ${params.chart_type} visual...`));
-        const barBg = document.createElement('div');
-        barBg.style.cssText = 'width:100%;background:rgba(255,255,255,0.1);border-radius:10px;height:8px;overflow:hidden';
-        const barFill = document.createElement('div');
-        barFill.style.cssText = 'width:80%;background:var(--primary);height:100%;border-radius:10px';
-        barBg.appendChild(barFill);
-        spinner.appendChild(spinH);
-        spinner.appendChild(barBg);
-        canvas.appendChild(spinner);
+        canvas.classList.remove('is-chart-grid');
+        const loadingState = document.createElement('div');
+        loadingState.className = 'chart-loading-state';
+        const loadingTitle = document.createElement('h4');
+        const spinnerIcon = document.createElement('i');
+        spinnerIcon.className = 'fa-solid fa-spinner fa-spin';
+        loadingTitle.append(spinnerIcon, document.createTextNode(`  Rendering ${params.chart_type} visual...`));
+        const loadingTrack = document.createElement('div');
+        loadingTrack.className = 'chart-loading-track';
+        loadingTrack.appendChild(document.createElement('span'));
+        loadingState.append(loadingTitle, loadingTrack);
+        canvas.appendChild(loadingState);
 
         try {
             const res = await fetch(`/api/sessions/${appState.activeSessionId}/custom_chart`, {
@@ -2096,29 +2161,95 @@ function initPowerBIBuilder() {
             canvas.innerHTML = '';
 
             const card = document.createElement('div');
-            card.className = 'glass-card chart-card fade-in';
-            card.style.cssText = 'padding: 15px; display: flex; flex-direction: column; gap: 12px; width: 100%;';
+            card.className = 'chart-card custom-chart-card';
 
             const titleText = `${params.y_col || ''} by ${params.x_col || ''} (${(params.chart_type || '').toUpperCase()})`;
-
-            const headerHTML = `
-                <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px;">
-                    <h4 style="margin: 0; font-size: 1rem; color: white;"><i class="fa-solid fa-chart-line" style="color: var(--primary-light);"></i> ${titleText}</h4>
-                    <button class="btn btn-secondary pin-report-btn" style="font-size: 0.8rem; padding: 5px 12px; border-radius: 20px; transition: all 0.2s;">
-                        <i class="fa-solid fa-thumbtack"></i> <span>Add to PDF Report</span>
-                    </button>
-                </div>
-            `;
-
-            card.innerHTML = headerHTML;
+            const header = document.createElement('div');
+            header.className = 'custom-chart-header';
+            const title = document.createElement('div');
+            title.className = 'custom-chart-title';
+            const titleIcon = document.createElement('i');
+            titleIcon.className = 'fa-solid fa-chart-simple';
+            const titleHeading = document.createElement('h4');
+            titleHeading.textContent = titleText;
+            title.append(titleIcon, titleHeading);
+            const pinBtn = document.createElement('button');
+            pinBtn.type = 'button';
+            pinBtn.className = 'btn btn-secondary pin-report-btn';
+            pinBtn.innerHTML = '<i class="fa-solid fa-thumbtack"></i> <span>Add to report</span>';
+            header.append(title, pinBtn);
+            card.appendChild(header);
 
             const contentDiv = document.createElement('div');
-            contentDiv.style.cssText = 'flex-grow: 1; min-height: 320px; width: 100%; display: flex; justify-content: center; align-items: center;';
+            contentDiv.className = 'custom-chart-content';
 
-            if (data.chart.type === 'image') {
+            if (data.chart.interactive_data) {
+                const chartData = data.chart.interactive_data;
+                const chartType = chartData.chart_type;
+                const isCircular = chartType === 'pie' || chartType === 'donut';
+                const isHorizontal = chartType === 'bar';
+                const plot = document.createElement('div');
+                plot.className = 'custom-chart-plot';
+                const chartCanvas = document.createElement('canvas');
+                chartCanvas.setAttribute('role', 'img');
+                chartCanvas.setAttribute('aria-label', titleText);
+                plot.appendChild(chartCanvas);
+                contentDiv.appendChild(plot);
+
+                const config = {
+                    type: chartType === 'donut' ? 'doughnut' : chartType === 'area' ? 'line' : chartType === 'column' ? 'bar' : chartType,
+                    data: {
+                        labels: chartData.labels,
+                        datasets: [{
+                            label: chartData.y_axis,
+                            data: chartType === 'scatter' ? chartData.points : chartData.values,
+                            backgroundColor: isCircular ? chartData.values.map((_, index) => chartColors.palette[index % chartColors.palette.length]) : chartType === 'area' ? chartColors.primaryAlpha : chartColors.primary,
+                            borderColor: chartColors.primary,
+                            borderWidth: chartType === 'line' || chartType === 'area' ? 2.5 : 0,
+                            fill: chartType === 'area',
+                            tension: 0.24,
+                            pointRadius: chartType === 'scatter' ? 3 : chartType === 'line' || chartType === 'area' ? 2 : 0,
+                            pointHoverRadius: 6,
+                            borderRadius: chartType === 'column' || chartType === 'bar' ? 3 : 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: chartType === 'bar' ? 'y' : 'x',
+                        cutout: chartType === 'donut' ? '62%' : 0,
+                        plugins: {
+                            legend: {
+                                display: isCircular,
+                                position: 'bottom',
+                                labels: { color: '#b4bfce', usePointStyle: true, pointStyle: 'circle' }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label(context) {
+                                        const value = chartType === 'scatter' ? context.parsed.y : isCircular ? context.parsed : isHorizontal ? context.parsed.x : context.parsed.y;
+                                        return `${context.dataset.label || context.label}: ${new Intl.NumberFormat().format(value)}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: isCircular ? {} : {
+                            x: { beginAtZero: isHorizontal, ticks: { color: '#c0cad7' }, grid: { display: isHorizontal, color: 'rgba(210, 222, 236, 0.12)' } },
+                            y: { beginAtZero: !isHorizontal, ticks: { color: '#b2bece' }, grid: { display: !isHorizontal, color: 'rgba(210, 222, 236, 0.12)' } }
+                        }
+                    }
+                };
+                if (chartType === 'scatter') {
+                    config.data.datasets[0].label = `${chartData.y_axis} vs ${chartData.x_axis}`;
+                    config.options.scales.x = { title: { display: true, text: chartData.x_axis, color: '#b2bece' }, ticks: { color: '#c0cad7' } };
+                    config.options.scales.y.title = { display: true, text: chartData.y_axis, color: '#b2bece' };
+                }
+                appState.chartInstances.push(new Chart(chartCanvas.getContext('2d'), config));
+            } else if (data.chart.type === 'image') {
                 const img = document.createElement('img');
                 img.src = `data:image/png;base64,${data.chart.data}`;
-                img.style.cssText = 'max-width: 100%; max-height: 420px; border-radius: 8px; object-fit: contain;';
+                img.className = 'custom-chart-image';
+                img.alt = titleText;
                 contentDiv.appendChild(img);
             } else if (data.chart.type === 'html') {
                 contentDiv.innerHTML = data.chart.data;
@@ -2127,7 +2258,6 @@ function initPowerBIBuilder() {
             canvas.appendChild(card);
 
             // Bind Pin to Report Button
-            const pinBtn = card.querySelector('.pin-report-btn');
             if (pinBtn) {
                 const chartPayload = {
                     title: titleText,
@@ -2151,15 +2281,11 @@ function initPowerBIBuilder() {
                         if (countSpan) countSpan.textContent = pinData.pinned_count;
 
                         if (pinData.is_pinned) {
-                            pinBtn.style.background = 'rgba(16, 185, 129, 0.25)';
-                            pinBtn.style.color = '#10b981';
-                            pinBtn.style.borderColor = '#10b981';
-                            pinBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Pinned to PDF Report</span>';
+                            pinBtn.classList.add('is-pinned');
+                            pinBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Pinned</span>';
                         } else {
-                            pinBtn.style.background = '';
-                            pinBtn.style.color = '';
-                            pinBtn.style.borderColor = '';
-                            pinBtn.innerHTML = '<i class="fa-solid fa-thumbtack"></i> <span>Add to PDF Report</span>';
+                            pinBtn.classList.remove('is-pinned');
+                            pinBtn.innerHTML = '<i class="fa-solid fa-thumbtack"></i> <span>Add to report</span>';
                         }
                     } catch (pinErr) {
                         alert(pinErr.message);
@@ -2171,12 +2297,12 @@ function initPowerBIBuilder() {
             // Build error state safely — err.message set via textContent only
             canvas.innerHTML = '';
             const errDiv = document.createElement('div');
-            errDiv.className = 'bi-placeholder';
-            errDiv.style.color = '#ef4444';
-            errDiv.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="font-size:2.5rem;margin-bottom:1rem"></i>'; // icon only
+            errDiv.className = 'chart-error-state';
+            const errorIcon = document.createElement('i');
+            errorIcon.className = 'fa-solid fa-circle-exclamation';
             const errMsg = document.createElement('p');
             errMsg.textContent = err.message;
-            errDiv.appendChild(errMsg);
+            errDiv.append(errorIcon, errMsg);
             canvas.appendChild(errDiv);
         }
     }
@@ -2186,41 +2312,47 @@ function initPowerBIBuilder() {
 
 const promptLibrary = [
     // --- Data Quality & Missing Values ---
-    { text: "Drop columns that are mostly empty", category: "Data Quality", usage: "🔥 Highly Used" },
-    { text: "Remove duplicate rows from the dataset", category: "Data Quality", usage: "🔥 Highly Used" },
+    { text: "Delete columns that are mostly empty", category: "Data Quality", usage: "🔥 Highly Used" },
+    { text: "Remove duplicate rows", category: "Data Quality", usage: "🔥 Highly Used" },
+    { text: "Remove duplicates based on specific columns", category: "Data Quality", usage: "📊 88% Match" },
     { text: "Fill empty numbers with the average", category: "Missing Values", usage: "🔥 Highly Used" },
     { text: "Fill empty numbers with the median", category: "Missing Values", usage: "📊 92% Match" },
-    { text: "Fill empty text values with 'Unknown'", category: "Missing Values", usage: "📊 85% Match" },
-    { text: "Drop rows where the target variable is missing", category: "Missing Values", usage: "🤖 Data Science" },
+    { text: "Fill empty text with 'Unknown'", category: "Missing Values", usage: "📊 85% Match" },
+    { text: "Delete rows that have missing values", category: "Missing Values", usage: "🤖 Data Science" },
 
     // --- Text & Formatting ---
-    { text: "Convert all text to lowercase", category: "Text Formatting", usage: "📝 Formatting" },
-    { text: "Trim extra spaces from all text columns", category: "Text Formatting", usage: "🔥 Highly Used" },
-    { text: "Extract numbers from text (e.g. '100 USD' -> 100)", category: "Text Parsing", usage: "💡 Pro Tip" },
-    { text: "Extract the domain name from all email addresses", category: "Text Parsing", usage: "💡 Pro Tip" },
-    { text: "Standardize Yes/No to 1/0", category: "Text Formatting", usage: "📊 88% Match" },
+    { text: "Convert text to lower case", category: "Text Formatting", usage: "📝 Formatting" },
+    { text: "Convert text to upper case", category: "Text Formatting", usage: "📝 Formatting" },
+    { text: "Trim extra spaces from text", category: "Text Formatting", usage: "🔥 Highly Used" },
+    { text: "Remove punctuation from text", category: "Text Formatting", usage: "💡 Pro Tip" },
+    { text: "Extract numbers from text", category: "Text Parsing", usage: "💡 Pro Tip" },
+    { text: "Extract emails from text", category: "Text Parsing", usage: "💡 Pro Tip" },
+    { text: "Calculate the length of text strings", category: "Text Parsing", usage: "🤖 Data Science" },
+    { text: "Change Yes/No to 1/0", category: "Text Formatting", usage: "📊 88% Match" },
 
     // --- Dates & Times ---
-    { text: "Fix all the dates so they look the same", category: "Dates", usage: "🔥 Highly Used" },
-    { text: "Extract just the year from the date column", category: "Dates", usage: "💡 Pro Tip" },
-    { text: "Calculate the age from the birthdate column", category: "Dates", usage: "🏥 Healthcare" },
+    { text: "Fix dates to look the same", category: "Dates", usage: "🔥 Highly Used" },
+    { text: "Extract the year from dates", category: "Dates", usage: "💡 Pro Tip" },
+    { text: "Calculate age from birthdate", category: "Dates", usage: "🏥 Healthcare" },
 
     // --- Outliers & Math ---
-    { text: "Remove extreme outliers in numbers", category: "Math & Outliers", usage: "🤖 Data Science" },
-    { text: "Cap extreme values instead of dropping them", category: "Math & Outliers", usage: "🤖 Data Science" },
-    { text: "Round all decimals to two places", category: "Math", usage: "📈 Finance" },
-    { text: "Make all negative numbers positive (absolute value)", category: "Math", usage: "📈 Finance" },
+    { text: "Remove extreme numbers (outliers)", category: "Math & Outliers", usage: "🤖 Data Science" },
+    { text: "Rounding off the values to 2 decimals", category: "Math", usage: "📈 Finance" },
+    { text: "Make negative numbers positive", category: "Math", usage: "📈 Finance" },
+    { text: "Convert units (e.g., kg to lbs)", category: "Math", usage: "💡 Pro Tip" },
 
-    // --- Machine Learning & Feature Engineering ---
-    { text: "Remove ID columns and useless data", category: "Feature Selection", usage: "📊 94% Match" },
-    { text: "Drop columns that have the exact same value everywhere", category: "Feature Selection", usage: "🤖 Data Science" },
-    { text: "Turn text categories into numbers", category: "Machine Learning", usage: "📊 88% Match" },
-    { text: "Scale all numeric features between 0 and 1", category: "Machine Learning", usage: "🤖 Data Science" },
+    // --- Sorting & ML ---
+    { text: "Sort data in ascending order", category: "Sorting", usage: "🔥 Highly Used" },
+    { text: "Sort data in descending order", category: "Sorting", usage: "🔥 Highly Used" },
+    { text: "Remove ID columns", category: "Feature Selection", usage: "📊 94% Match" },
+    { text: "Find the max and min values", category: "Analysis", usage: "📊 88% Match" },
     
-    // --- Industry Specific ---
-    { text: "Remove personal info like names, emails, and phones", category: "Privacy", usage: "🏥 Healthcare" },
-    { text: "Fix currency formatting and fill empty prices with 0", category: "Finance", usage: "📈 Finance" },
-    { text: "Group small categories into an 'Other' bucket", category: "E-Commerce", usage: "🛒 Retail" }
+    // --- Advanced Machine Learning ---
+    { text: "Convert categories to numbers (Label Encode)", category: "Machine Learning", usage: "🤖 Data Science" },
+    { text: "Create dummy variables (One-Hot Encode)", category: "Machine Learning", usage: "🤖 Data Science" },
+    { text: "Scale numbers between 0 and 1 (Min-Max)", category: "Machine Learning", usage: "🤖 Data Science" },
+    { text: "Standardize numbers to Z-scores", category: "Machine Learning", usage: "🤖 Data Science" },
+    { text: "Apply log transformation to numbers", category: "Machine Learning", usage: "🤖 Data Science" }
 ];
 
 function setupAutocomplete(inputId, dropdownId, isSchemaAware = false) {

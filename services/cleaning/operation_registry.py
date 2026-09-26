@@ -48,7 +48,7 @@ OPERATIONS = {
         "description": "Move column to the last position."
     },
     "drop_constant_column": {
-        "aliases": ["drop constant", "drop low variance", "constant column", "zero variance"],
+        "aliases": ["drop constant", "drop low variance", "constant column", "zero variance", "drop if constant"],
         "scope": "column",
         "changes_rows": False, "changes_columns": True, "changes_values": False,
         "dtype_constraint": "any", "required_params": [],
@@ -110,7 +110,7 @@ OPERATIONS = {
         "description": "Fill missing values with column mode."
     },
     "impute_zero": {
-        "aliases": ["fill 0", "fill zero", "impute 0", "fill missing with 0", "replace missing with 0",
+        "aliases": ["fill 0", "fill zero", "impute 0", "impute zero", "fill missing with 0", "replace missing with 0",
                     "fill null with 0", "fill with zero"],
         "scope": "column",
         "changes_rows": False, "changes_columns": False, "changes_values": True,
@@ -147,7 +147,7 @@ OPERATIONS = {
     "drop_duplicates_full": {
         "aliases": ["drop full duplicates", "remove whole duplicates", "deduplicate dataset",
                     "drop all duplicates", "remove duplicate rows", "drop duplicate rows",
-                    "remove duplicates"],
+                    "remove duplicates", "drop duplicates"],
         "scope": "dataset",
         "changes_rows": True, "changes_columns": False, "changes_values": False,
         "dtype_constraint": "any", "required_params": [],
@@ -163,23 +163,42 @@ OPERATIONS = {
         "description": "Remove duplicate rows using this column as the subset key."
     },
 
+    # ── SORTING ───────────────────────────────────────────────────────────────
+    "sort_ascending": {
+        "aliases": ["sort ascending", "sort in ascending order", "ascending"],
+        "scope": "column",
+        "changes_rows": True, "changes_columns": False, "changes_values": False,
+        "dtype_constraint": "any", "required_params": [],
+        "description": "Sort the entire dataset in ascending order based on this column."
+    },
+    "sort_descending": {
+        "aliases": ["sort descending", "sort in descending order", "descending"],
+        "scope": "column",
+        "changes_rows": True, "changes_columns": False, "changes_values": False,
+        "dtype_constraint": "any", "required_params": [],
+        "description": "Sort the entire dataset in descending order based on this column."
+    },
+
     # ── TEXT CLEANING ──────────────────────────────────────────────────────────
     "uppercase": {
-        "aliases": ["upper", "uppercase", "to upper", "convert to upper", "make uppercase"],
+        "aliases": ["upper", "uppercase", "to upper", "convert to upper", "make uppercase",
+                    "convert to uppercase", "to uppercase", "make upper"],
         "scope": "column",
         "changes_rows": False, "changes_columns": False, "changes_values": True,
         "dtype_constraint": "text", "required_params": [],
         "description": "Convert text to UPPERCASE."
     },
     "lowercase": {
-        "aliases": ["lower", "lowercase", "to lower", "convert to lower", "make lowercase"],
+        "aliases": ["lower", "lowercase", "to lower", "convert to lower", "make lowercase",
+                    "convert to lowercase", "to lowercase", "make lower"],
         "scope": "column",
         "changes_rows": False, "changes_columns": False, "changes_values": True,
         "dtype_constraint": "text", "required_params": [],
         "description": "Convert text to lowercase."
     },
     "titlecase": {
-        "aliases": ["title", "titlecase", "capitalize", "title case", "proper case"],
+        "aliases": ["title", "titlecase", "capitalize", "title case", "proper case",
+                    "convert to titlecase", "convert to title case", "to titlecase"],
         "scope": "column",
         "changes_rows": False, "changes_columns": False, "changes_values": True,
         "dtype_constraint": "text", "required_params": [],
@@ -320,8 +339,8 @@ OPERATIONS = {
         "description": "Label encode a categorical column to integer codes."
     },
     "normalize_boolean": {
-        "aliases": ["normalize bool", "boolean normalize", "yes/no", "y/n", "true/false to 0/1",
-                    "convert boolean", "bool to int"],
+        "aliases": ["normalize bool", "normalize boolean", "boolean normalize", "yes/no", "y/n", "true/false to 0/1",
+                    "convert boolean", "bool to int", "standardize boolean", "fix boolean"],
         "scope": "column",
         "changes_rows": False, "changes_columns": False, "changes_values": True,
         "dtype_constraint": "any", "required_params": [],
@@ -551,6 +570,22 @@ OPERATIONS = {
         "changes_rows": False, "changes_columns": True, "changes_values": False,
         "dtype_constraint": "numeric", "required_params": [],
         "description": "Bin numeric values into quantile or equal-width buckets."
+    },
+
+    # ── ADVANCED OPERATIONS ──────────────────────────────────────────────────
+    "calculate_age": {
+        "aliases": ["calculate age", "get age", "compute age from date", "convert to age"],
+        "scope": "column",
+        "changes_rows": False, "changes_columns": False, "changes_values": True,
+        "dtype_constraint": "any", "required_params": [],
+        "description": "Calculate age in years from a birthdate column."
+    },
+    "anonymize_text": {
+        "aliases": ["anonymize", "hash text", "scramble text", "hide names", "pseudonymize"],
+        "scope": "column",
+        "changes_rows": False, "changes_columns": False, "changes_values": True,
+        "dtype_constraint": "text", "required_params": [],
+        "description": "Anonymize sensitive text (like names) using a secure hash."
     },
 
     # ── UNSUPPORTED (explicit sentinel) ───────────────────────────────────────

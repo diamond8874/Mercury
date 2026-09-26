@@ -14,6 +14,25 @@ from flask import current_app
 from services.ai_service import get_llm_client
 from utils.helpers import parse_json_response
 from utils.session_manager import save_session
+from services.cleaning.intent_parser import build_cleaning_plan
+
+
+def _explicit_value_mapping_updates(message: str, current_session: dict) -> Dict[str, Any]:
+    """Preserve explicit named-column value mappings even if the LLM misses them."""
+    updates = {}
+    columns = [col.get("name", "") for col in current_session.get("columns", [])]
+    for col in columns:
+        if not col or not re.search(rf'(?<!\w){re.escape(col)}(?!\w)', message, re.IGNORECASE):
+            continue
+        plan = build_cleaning_plan(col, message, None)
+        mapping_op = next((op for op in plan if op.get("operation") == "replace_value_exact"), None)
+        if mapping_op and mapping_op.get("parameters", {}).get("mapping"):
+            updates[col] = {
+                "action": "transform",
+                "reason": "Applied explicit value mapping requested in chat.",
+                "transformation": message,
+            }
+    return updates
 
 
 def run_local_fallback(msg_lower: str, current_session: dict) -> Dict[str, Any]:
@@ -39,7 +58,7 @@ def run_local_fallback(msg_lower: str, current_session: dict) -> Dict[str, Any]:
                 schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in chat.", "transformation": None}
             elif any(kw in msg_lower for kw in ["keep", "add", "retain", "include"]):
                 schema_updates[col] = {"action": "keep", "reason": "Kept by user request in chat.", "transformation": None}
-            elif any(kw in msg_lower for kw in ["transform", "convert", "encode", "impute", "round", "round off", "whole number", "integer"]):
+            elif re.search(r'\b(?:transform|convert|encode|impute|round|whole\s+number|integer|change|replace|map|set)\b', msg_lower):
                 schema_updates[col] = {"action": "transform", "reason": "Transform requested in chat.", "transformation": msg_lower}
     return schema_updates
 
@@ -113,14 +132,17 @@ KEEP must not modify data. Imputation must be an explicit transform.
 Current columns and chosen actions:
 {json.dumps(schema_context, indent=2)}
 
-When the user asks for a schema change, answer with valid JSON only in this format:
+CRITICAL INSTRUCTION:
+1. In this system, a "schema update" includes ANY data-level transformation applied to a column (e.g., replacing specific values, rounding numbers, filling nulls, fixing typos). Do NOT refuse data-level transformations.
+2. USER OVERRIDE: If the user explicitly asks to keep, drop, or transform a column (e.g., "dont drop PatientID"), YOU MUST OBEY THEM IMMEDIATELY, even if it contradicts the global goal. The user's direct chat command takes absolute priority over the goal.
+When the user asks for ANY change (structural or data-level), answer with valid JSON only in this format:
 {{
   "message": "Your human-friendly response.",
   "schema_updates": {{
     "ExactColumnName": {{
       "action": "keep" | "drop" | "transform",
       "reason": "Reason for the change.",
-      "transformation": "Description or null"
+      "transformation": "Description of the data transformation (e.g., 'replace 75 with 78')"
     }}
   }}
 }}
@@ -146,6 +168,11 @@ If no changes are needed, return empty schema_updates {{}}.
         except Exception:
             response_msg = response_text.strip()
             schema_updates = {}
+
+        if isinstance(schema_updates, dict):
+            schema_updates.update(_explicit_value_mapping_updates(message, session_data))
+        else:
+            schema_updates = _explicit_value_mapping_updates(message, session_data)
 
         for col, col_data in schema_updates.items():
             matched_col = next((c for c in session_data["column_actions"] if c.lower() == col.lower()), col)
@@ -253,14 +280,17 @@ KEEP must not modify data. Imputation must be an explicit transform.
 Current columns and chosen actions:
 {json.dumps(schema_context, indent=2)}
 
-When the user asks for a schema change, answer with valid JSON only in this format:
+CRITICAL INSTRUCTION:
+1. In this system, a "schema update" includes ANY data-level transformation applied to a column (e.g., replacing specific values, rounding numbers, filling nulls, fixing typos). Do NOT refuse data-level transformations.
+2. USER OVERRIDE: If the user explicitly asks to keep, drop, or transform a column (e.g., "dont drop PatientID"), YOU MUST OBEY THEM IMMEDIATELY, even if it contradicts the global goal. The user's direct chat command takes absolute priority over the goal.
+When the user asks for ANY change (structural or data-level), answer with valid JSON only in this format:
 {{
   "message": "Your human-friendly response.",
   "schema_updates": {{
     "ExactColumnName": {{
       "action": "keep" | "drop" | "transform",
       "reason": "Reason for the change.",
-      "transformation": "Description or null"
+      "transformation": "Description of the data transformation (e.g., 'replace 75 with 78')"
     }}
   }}
 }}
@@ -298,12 +328,21 @@ If no changes are needed, return empty schema_updates {{}}.
             clean_message = full_raw.strip()
             schema_updates = {}
 
+        if isinstance(schema_updates, dict):
+            schema_updates.update(_explicit_value_mapping_updates(message, session_data))
+        else:
+            schema_updates = _explicit_value_mapping_updates(message, session_data)
+
         if schema_updates:
             for col, col_data in schema_updates.items():
                 matched_col = next((c for c in session_data["column_actions"] if c.lower() == col.lower()), col)
                 session_data["column_actions"][matched_col] = col_data
 
-        trigger = len(schema_updates) > 0
+        # Trigger a reprocess if schema_updates > 0, OR if the user is asking for a change (to catch edge cases where LLM returns {} because the schema was already updated previously but the frontend missed the reprocess)
+        action_keywords = ["sort", "drop", "keep", "remove", "clean", "change", "transform", "replace", "impute", "process", "update", "format"]
+        user_wants_action = any(kw in message.lower() for kw in action_keywords)
+        trigger = (len(schema_updates) > 0) or user_wants_action
+        
         yield f"event: schema_updates\ndata: {json.dumps({'schema_updates': schema_updates, 'column_actions': session_data['column_actions'], 'trigger_reprocess': trigger})}\n\n"
 
         words = clean_message.split(" ")

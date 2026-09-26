@@ -12,10 +12,40 @@ import base64
 import threading
 PLOT_LOCK = threading.RLock()
 
+def _style_figure(fig):
+    for ax in fig.axes:
+        ax.set_axisbelow(True)
+        ax.tick_params(axis='both', colors='#b7c3d1', labelsize=8, length=0, pad=6)
+        ax.title.set(color='#f1f5f9', fontsize=12, fontweight='semibold')
+        ax.xaxis.label.set(color='#c6d0dc', fontsize=9, fontweight='medium')
+        ax.yaxis.label.set(color='#c6d0dc', fontsize=9, fontweight='medium')
+        ax.xaxis.labelpad = 8
+        ax.yaxis.labelpad = 8
+
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        for axis in (ax.xaxis, ax.yaxis):
+            for gridline in axis.get_gridlines():
+                gridline.set_color('#8493a6')
+                gridline.set_alpha(0.12)
+                gridline.set_linewidth(0.7)
+
+        legend = ax.get_legend()
+        if legend:
+            frame = legend.get_frame()
+            frame.set_facecolor('#162234')
+            frame.set_edgecolor('#35465b')
+            frame.set_alpha(0.92)
+            for label in legend.get_texts():
+                label.set_color('#c6d0dc')
+                label.set_fontsize(8)
+
 def _fig_to_base64(fig):
     """Helper to convert matplotlib figure to high-quality base64 image string with thread safety."""
     with PLOT_LOCK:
         try:
+            _style_figure(fig)
             buf = io.BytesIO()
             fig.savefig(buf, format='png', dpi=200, bbox_inches='tight', transparent=True)
             buf.seek(0)

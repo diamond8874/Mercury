@@ -1,5 +1,19 @@
 # Agent Commit Log
 
+| 2026-09-27 | GitHub Copilot | Fix chart errors from duplicate headers | `utils/helpers.py`, `services/dataset_service.py`, `routes/visualization.py`, `tests/test_phase1_hygiene.py`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Normalize duplicate dataframe headers to stable unique names on upload and reload, preventing chart code from receiving a DataFrame where it expects a Series; added regression coverage. |
+
+| 2026-09-27 | GitHub Copilot | Make custom charts interactive | `services/visualization_service.py`, `static/app.js`, `static/style.css`, `tests/test_phase1_hygiene.py`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Added structured chart data to existing custom-chart responses and rendered common chart types with live Chart.js tooltips; fixed duplicate-axis column selection and retained image fallback. |
+
+| 2026-09-27 | GitHub Copilot | Clean up Python chart rendering | `powerbi_visuals/trend_charts.py`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Added shared Matplotlib post-render styling for cleaner typography, reduced chart chrome, subtle grids, and consistent legends across image-based visualizations. |
+
+| 2026-09-27 | GitHub Copilot | Polish visualization chart styling | `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Unified single-series colors, raised axis label contrast, and refined line and bar styling for a more consistent professional chart workspace. |
+
+| 2026-09-27 | GitHub Copilot | Refine chart visualization workspace | `static/index.html`, `static/style.css`, `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Reworked the chart picker and canvas into a responsive workspace; polished Chart.js colors, axes, legends, and tooltips; replaced inline custom-card styling with reusable responsive classes and safe DOM titles. |
+
+| 2026-09-27 | GitHub Copilot | Fix cleaning summary chat rendering | `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Rendered applied/error summaries as safe Markdown, omitted unchanged KEEP audit rows, and added an explicit no-changes message. |
+
+| 2026-09-27 | GitHub Copilot | Fix numeric value mapping requests | `services/cleaning/intent_parser.py`, `services/chat_service.py`, `tests/test_cleaning_engine.py`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Prioritized explicit slash-list mappings over boolean normalization, ensured named mappings override LLM misses, expanded offline fallback intent detection, and added parser/chat regression coverage. |
+
 ## Commit: feat(viz): Add On-Demand Visual Picker Palette & PDF Report Pinning System
 - **Routes (`components/routes.py`)**: Added `/api/sessions/<session_id>/pin_chart` (POST) and `/api/sessions/<session_id>/pinned_charts` (GET) endpoints. Modified `create_pdf_report()` to render `pinned_charts` when present.
 - **Frontend UI (`static/index.html` & `static/app.js`)**: Built 11-category visual picker icon gallery, column dropdown modal (`#chart-config-modal`), and chart card **"📌 Add to PDF Report"** button with live pinned badge counter.
@@ -57,3 +71,12 @@
 | 2026-08-22 | Antigravity AI | Remove Header Goal Subtitle Text | `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md` | Removed Goal text subtitle rendering from header UI per user design directive. | N/A |
 | 2026-09-02 | Antigravity AI | Full Project Quality Audit & Duplicate Route Resolution | `components/routes.py`, `services/ai_service.py`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Conducted full architectural, security, and test suite audit. Fixed duplicate Flask route `@api_blueprint.route('/api/sessions/<id>/status')`, removed stray imports, verified all 30 pytest test cases pass cleanly. | ~12k tokens |
 
+- Updated app.js promptLibrary to include layman terms and advanced ML suggestions.
+- Modified processDataset in app.js to parse background job audit_logs and display Applied Changes and Failed to Update messages in chat UI.
+- Added sort_ascending and sort_descending implementations to services/cleaning/operation_registry.py and services/cleaning/executor.py.
+- Added calculate_age and anonymize_text operations to services/cleaning/operation_registry.py and services/cleaning/executor.py.
+- Expanded Industry Starter Packs in static/index.html to 10 options.
+- Modified static/style.css to make .industry-cards horizontally scrollable with custom scrollbars.
+- Updated static/app.js to auto-click the analyzeDataBtn when a preset button is clicked.
+- Fixed a bug where sort_ascending, sort_descending, calculate_age, and anonymize_text operations were successfully parsed by intent_parser but were skipped during execution because they were missing from the _HANDLERS dictionary in services/cleaning/executor.py.
+| 2026-09-27 | Antigravity AI | AI Intent Parsing Fixes & UI Dropdown Bugfix | services/cleaning/intent_parser.py, services/cleaning/operation_registry.py, static/style.css, static/index.html | Fixed detect_operation execution order and replaced extract_value_mapping regex for natural language pair recognition. Updated UI to render autocomplete dropdown above input and handle overflow. Verified 44/44 end-to-end operations using new generate_tests script. | N/A |

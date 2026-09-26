@@ -13,6 +13,7 @@ from services.cleaning.intent_parser import build_cleaning_plan
 from services.cleaning.validator import validate_plan
 from services.cleaning.executor import execute_plan
 from services.data_service import apply_column_transformation
+from services.chat_service import _explicit_value_mapping_updates
 
 
 @pytest.fixture
@@ -161,6 +162,31 @@ def test_encodings(sample_df):
 
     df2, _ = apply_column_transformation(sample_df.copy(), "Churn", "normalize bool")
     assert set(df2["Churn"].dropna().unique()).issubset({0, 1})
+
+
+@pytest.mark.parametrize("prompt, expected", [
+    ("change Churn 0 to No and 1 to Yes", {"0": "No", "1": "Yes"}),
+    ("replace 0 with No and 1 with Yes", {"0": "No", "1": "Yes"}),
+    ("change column Churn from 0/1 to yes/no", {"0": "yes", "1": "no"}),
+])
+def test_explicit_numeric_value_mappings(sample_df, prompt, expected):
+    plan = build_cleaning_plan("Churn", prompt, sample_df)
+
+    assert plan[0]["operation"] == "replace_value_exact"
+    assert plan[0]["parameters"]["mapping"] == expected
+
+    result = execute_plan(plan, sample_df.copy())
+    assert result["df"]["Churn"].tolist() == [
+        expected["0"], expected["1"], expected["0"], expected["1"], expected["0"], expected["0"]
+    ]
+
+
+def test_chat_mapping_override_survives_llm_miss():
+    prompt = "change Churn from 0/1 to yes/no"
+    updates = _explicit_value_mapping_updates(prompt, {"columns": [{"name": "Churn"}]})
+
+    assert updates["Churn"]["action"] == "transform"
+    assert updates["Churn"]["transformation"] == prompt
 
 
 # ── 6. NUMERIC & DATATYPE CONVERSIONS ──────────────────────────────────────────

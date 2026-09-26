@@ -13,7 +13,7 @@ from flask import current_app
 
 from utils.session_manager import save_session, load_session
 from utils.upload_validator import validate_upload
-from utils.helpers import read_csv_robust, safe_to_excel
+from utils.helpers import make_column_names_unique, read_csv_robust, safe_to_excel
 from services.cleaning import run_cleaning_engine, build_cleaning_plan, validate_plan
 
 
@@ -60,6 +60,7 @@ def save_uploaded_file(file_storage, user_id=None):
         else:
             df = read_csv_robust(file_path)
             sheets = ["Default"]
+        df = make_column_names_unique(df)
 
         num_rows, num_cols = df.shape
         columns = []
@@ -148,6 +149,7 @@ def process_cleaning_for_session(session_data, actions, sheet_name="Default"):
             df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
         else:
             df = read_csv_robust(file_path)
+        df = make_column_names_unique(df)
 
         session_data["column_actions"] = actions
 
@@ -259,6 +261,7 @@ def update_cell_value(session_data, row_idx, col_name, new_val):
             df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name not in ("Default", None) else 0)
         else:
             df = read_csv_robust(file_path)
+        df = make_column_names_unique(df)
 
         row_i = int(row_idx)
         if col_name not in df.columns or not (0 <= row_i < len(df)):
@@ -313,6 +316,7 @@ def dry_run_plan(session_data, actions, sheet_name="Default"):
             df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
         else:
             df = read_csv_robust(file_path)
+        df = make_column_names_unique(df)
 
         full_plan = []
         for col, col_data in actions.items():

@@ -1,5 +1,19 @@
 # Changelog
 
+- **Duplicate Dataset Headers (`utils/helpers.py`, `services/dataset_service.py`, `routes/visualization.py`)**: Duplicate column names receive stable suffixes during dataset loading so chart selection and rendering treat each column as a Series.
+
+- **Interactive Custom Charts (`services/visualization_service.py`, `static/app.js`, `static/style.css`)**: Common line, area, bar, column, pie, donut, and scatter visuals now render as live Chart.js charts with hover values and interactive legends; same-column axes are handled safely, and existing image output remains as a compatibility fallback.
+
+- **Clean Matplotlib Chart Theme (`powerbi_visuals/trend_charts.py`)**: Applied consistent typography, subtle gridlines, hidden chart spines, and readable legends to server-rendered chart images through the shared exporter.
+
+- **Professional Chart Styling (`static/app.js`)**: Standardized chart series colors, improved axis contrast and legibility, and refined line and bar styling across the visualization workspace.
+
+- **Refined Visualization Workspace (`static/index.html`, `static/style.css`, `static/app.js`)**: Replaced the fixed, inline-styled chart builder with a responsive visual-picker rail and chart stage; improved chart palettes, axes, tooltips, and spacing; standardized custom chart cards and loading/error states; retained chart generation and report pinning behavior.
+
+- **Readable Cleaning Summary (`static/app.js`)**: Replaced raw HTML in completion messages with escaped-renderer-compatible Markdown, hid unchanged KEEP entries, and report explicitly when no data changes were applied.
+
+- **Explicit Numeric Value Mapping (`services/cleaning/intent_parser.py`, `services/chat_service.py`)**: Prioritized explicit `0/1` replacement instructions over boolean normalization, paired slash-separated source/target lists, removed the target column name wherever it appears in the request, and ensured named explicit mappings override missed or incorrect LLM schema updates. Expanded offline fallback command detection and added parser-to-executor/chat regression coverage.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
@@ -280,3 +294,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Phase 1 & 2 baseline documentation for Agent Readiness (`AGENTS.md`, `ARCHITECTURE.md`, `COMMIT.md`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md`).
 - Established Token Optimization Protocol and Knowledge Graph Maintenance Rules.
+### Enhanced Chat & Prompts
+- Re-designed the chat UI to display detailed Applied Changes and Failed to Update messages.
+- Simplified the suggestion prompts to layman language and added new capabilities (sorting, ML encoding).
+### Enhanced Industry Starter Packs
+- Added 10 specialized industry goals to the UI (Healthcare, Finance, E-Commerce, etc).
+- Converted the Starter Packs UI into a horizontally scrollable container.
+- Introduced 1-Click Auto-Execution: Clicking a Starter Pack now instantly triggers the dataset analysis.
+- Backend: Added support for 'calculate_age' and 'anonymize_text' operations.
+
+### Fixed
+- Fixed AI prompt parsing issues where \eplace_value_exact\ mapping logic failed on natural language prompts (e.g., "0 to Male, 1 to Female" or "map 0 as Male").
+- Updated operation registry aliases to correctly match "impute zero", "drop duplicates", "drop if constant", and text casing operations.
+- Fixed UI layout bug where the Goal Autocomplete dropdown pushed the "Start AI Analysis" button off-screen by positioning the dropdown upwards and making the upload section scrollable.
+- Added comprehensive test script (\generate_tests.py\) covering 44 AI operations to validate the end-to-end data cleaning pipeline.

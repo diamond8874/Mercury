@@ -4,6 +4,30 @@ import uuid
 import pytest
 import pandas as pd
 from utils.session_manager import sanitize_session_id
+from services.visualization_service import render_dataset_chart
+
+def test_duplicate_column_names_are_selectable_for_charts():
+    df = pd.DataFrame(
+        [["A", 2, 10], ["B", 3, 20]],
+        columns=["Category", "Value", "Value"],
+    )
+
+    chart, error = render_dataset_chart(df, "trend", "line", "Category", "Value (2)")
+
+    assert error is None
+    assert chart["interactive_data"]["labels"] == ["A", "B"]
+    assert chart["interactive_data"]["values"] == [10.0, 20.0]
+
+    same_column_chart, error = render_dataset_chart(df, "trend", "line", "Value", "Value")
+
+    assert error is None
+    assert same_column_chart["interactive_data"]["labels"] == ["2", "3"]
+    assert same_column_chart["interactive_data"]["values"] == [2.0, 3.0]
+
+    waterfall, error = render_dataset_chart(df, "change_flow", "waterfall", "Category", "Value (2)")
+
+    assert error is None
+    assert waterfall["type"] == "image"
 
 def test_sanitize_session_id_uuid_validation():
     """Verify sanitize_session_id only accepts valid UUID strings."""
@@ -83,6 +107,27 @@ def test_pin_and_report_flow_portable(client):
     })
     assert chart_resp.status_code == 200
     assert chart_resp.get_json().get("success") is True
+
+    interactive_resp = client.post(f'/api/sessions/{session_id}/custom_chart', json={
+        "chart_category": "comparison",
+        "chart_type": "bar",
+        "x_col": "Department",
+        "y_col": "Salary"
+    })
+    assert interactive_resp.status_code == 200
+    interactive_chart = interactive_resp.get_json()["chart"]
+    assert interactive_chart["type"] == "image"
+    assert interactive_chart["interactive_data"]["labels"] == ["Sales", "Engineering", "Marketing", "HR"]
+    assert interactive_chart["interactive_data"]["values"] == [50000.0, 80000.0, 60000.0, 55000.0]
+
+    scatter_resp = client.post(f'/api/sessions/{session_id}/custom_chart', json={
+        "chart_category": "relationship",
+        "chart_type": "scatter",
+        "x_col": "Salary",
+        "y_col": "Salary"
+    })
+    assert scatter_resp.status_code == 200
+    assert scatter_resp.get_json()["chart"]["interactive_data"]["points"][0] == {"x": 50000.0, "y": 50000.0}
 
     # 4. Pin chart
     pin_payload = {

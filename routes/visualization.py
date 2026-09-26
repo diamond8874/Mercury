@@ -9,7 +9,7 @@ from flask import Blueprint, request, jsonify, current_app
 
 from utils.auth import get_owned_session_or_404
 from utils.session_manager import save_session
-from utils.helpers import read_csv_robust
+from utils.helpers import make_column_names_unique, read_csv_robust
 from services.visualization_service import suggest_viz_params, render_dataset_chart
 
 visualization_bp = Blueprint('visualization', __name__)
@@ -75,6 +75,7 @@ def generate_custom_chart(session_id):
             df = read_csv_robust(file_path)
         else:
             df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name != "Default" else 0)
+        df = make_column_names_unique(df)
     except Exception as e:
         return jsonify({"error": f"Failed to load dataset: {str(e)}"}), 500
 

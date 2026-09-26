@@ -13,6 +13,7 @@ from typing import Tuple, Optional
 from flask import current_app
 
 from services.ai_service import get_llm_client
+from utils.helpers import make_column_names_unique
 
 
 def extract_viz_params_fallback(msg_text: str, columns: list) -> dict:
@@ -118,6 +119,7 @@ def render_dataset_chart(
     Applies column inference, numeric conversions, filtering, aggregation/sampling,
     and dispatches to the correct PowerBI visuals module.
     """
+    df = make_column_names_unique(df)
     filters = filters or {}
 
     # Auto-resolve x_col and y_col if missing or invalid
@@ -248,8 +250,50 @@ def render_dataset_chart(
         if not result:
             return None, ("Unsupported chart type or category", 400)
 
+        interactive_types = {
+            ("trend", "line"), ("trend", "area"), ("trend", "column"),
+            ("comparison", "bar"), ("part_to_whole", "pie"),
+            ("part_to_whole", "donut"), ("relationship", "scatter"),
+        }
+        if (chart_category, chart_type) in interactive_types:
+            interactive_data = {
+                "chart_type": chart_type,
+                "x_axis": x_col,
+                "y_axis": y_col,
+            }
+            if chart_type in {"pie", "donut"}:
+                values = df.groupby(x_col, dropna=False)[y_col].sum().sort_values(ascending=False)
+                if len(values) > 10:
+                    values = pd.concat([
+                        values.iloc[:10],
+                        pd.Series({"Other": values.iloc[10:].sum()}),
+                    ])
+                interactive_data.update({
+                    "labels": values.index.astype(str).tolist(),
+                    "values": values.astype(float).tolist(),
+                })
+            elif chart_type == "scatter":
+                points = pd.DataFrame({
+                    "x": pd.to_numeric(df[x_col], errors="coerce"),
+                    "y": pd.to_numeric(df[y_col], errors="coerce"),
+                }).dropna()
+                interactive_data["points"] = [
+                    {"x": float(x_value), "y": float(y_value)}
+                    for x_value, y_value in points.itertuples(index=False, name=None)
+                ]
+            else:
+                chart_data = pd.DataFrame({
+                    "label": df[x_col],
+                    "value": pd.to_numeric(df[y_col], errors="coerce"),
+                }).dropna(subset=["label"])
+                interactive_data.update({
+                    "labels": chart_data["label"].astype(str).tolist(),
+                    "values": chart_data["value"].fillna(0).astype(float).tolist(),
+                })
+            result["interactive_data"] = interactive_data
+
         return result, None
 
     except Exception as e:
-        logging.error("Error generating chart: %s", str(e))
+        logging.exception("Error generating chart (%s/%s)", chart_category, chart_type)
         return None, (f"Error generating chart: {str(e)}", 500)

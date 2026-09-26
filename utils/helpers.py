@@ -8,6 +8,23 @@ logger = logging.getLogger(__name__)
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def make_column_names_unique(df: pd.DataFrame) -> pd.DataFrame:
+    """Give duplicate headers stable, selectable names such as ``Value (2)``."""
+    df = df.copy()
+    used = set()
+    unique_columns = []
+    for column in df.columns:
+        name = str(column)
+        candidate = name
+        suffix = 2
+        while candidate in used:
+            candidate = f"{name} ({suffix})"
+            suffix += 1
+        used.add(candidate)
+        unique_columns.append(candidate)
+    df.columns = unique_columns
+    return df
+
 def parse_json_response(text):
     """
     Robustly parses JSON from LLM responses:
