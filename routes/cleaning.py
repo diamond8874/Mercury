@@ -293,8 +293,8 @@ def analyze_schema():
     session_data["progress"] = 5
     save_session(session_data)
 
-    provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
-    model = data.get("model") or os.environ.get("LLM_MODEL") or "groq/openai/gpt-oss-120b"
+    provider = data.get("provider")
+    model = data.get("model")
     base_url = data.get("base_url")
     if base_url:
         is_debug = current_app.config.get("DEBUG", False)

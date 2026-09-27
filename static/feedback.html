@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feedback | Mercury DataCleaner</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="landing.css?v=2">
+    
+    <style>
+        .feedback-wrapper {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: calc(100vh - 100px); /* Account for navbar */
+            padding: 2rem;
+            position: relative;
+            z-index: 10;
+        }
+
+        .feedback-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 3rem;
+            width: 100%;
+            max-width: 600px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            transform: translateY(0);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .feedback-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            border-color: rgba(99, 102, 241, 0.3);
+        }
+
+        .stars-container {
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            margin: 2.5rem 0;
+        }
+
+        .star {
+            font-size: 3rem;
+            color: rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            text-shadow: 0 0 15px rgba(251, 191, 36, 0);
+        }
+
+        .star:hover, .star.active {
+            color: #fbbf24;
+            transform: scale(1.15) rotate(5deg);
+            text-shadow: 0 0 15px rgba(251, 191, 36, 0.5);
+        }
+
+        .feedback-textarea {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            border-radius: 12px;
+            padding: 1.25rem;
+            min-height: 150px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.05rem;
+            resize: vertical;
+            margin-bottom: 2rem;
+            transition: all 0.3s ease;
+            box-sizing: border-box;
+        }
+
+        .feedback-textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        .feedback-textarea::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .success-message {
+            text-align: center;
+            display: none;
+        }
+
+        .success-message i {
+            font-size: 5rem;
+            color: var(--success);
+            margin-bottom: 1.5rem;
+            filter: drop-shadow(0 0 20px rgba(16, 185, 129, 0.4));
+        }
+
+        /* Animated background elements to match hero */
+        .bg-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(100px);
+            z-index: 1;
+            opacity: 0.5;
+            animation: floatOrb 10s infinite alternate ease-in-out;
+        }
+
+        .orb-1 {
+            width: 400px;
+            height: 400px;
+            background: rgba(99, 102, 241, 0.2);
+            top: 20%;
+            left: 20%;
+        }
+
+        .orb-2 {
+            width: 300px;
+            height: 300px;
+            background: rgba(139, 92, 246, 0.15);
+            bottom: 20%;
+            right: 20%;
+            animation-delay: -5s;
+        }
+
+        @keyframes floatOrb {
+            0% { transform: translate(0, 0) scale(1); }
+            100% { transform: translate(50px, -50px) scale(1.1); }
+        }
+    </style>
+</head>
+<body class="dark-theme landing-body">
+
+    <!-- NAVBAR (Same as Landing Page) -->
+    <nav class="landing-nav" style="position: relative; z-index: 20;">
+        <a href="/" class="landing-logo">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Mercury
+        </a>
+        <div class="nav-actions">
+            <a href="/dashboard" class="nav-link">Sign In</a>
+            <a href="/dashboard" class="btn-landing btn-primary-glow" style="padding: 0.5rem 1.2rem; font-size: 0.95rem;">Get Started</a>
+        </div>
+    </nav>
+
+    <!-- Background Orbs -->
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+
+    <div class="feedback-wrapper">
+        <div class="feedback-card" id="feedback-form-container">
+            <div class="hero-badge" style="margin: 0 auto 1.5rem auto; width: max-content; display: flex;">
+                <i class="fa-solid fa-heart" style="color: #ec4899;"></i> We Value Your Input
+            </div>
+            
+            <h1 class="hero-title" style="font-size: 2.5rem; margin-bottom: 1rem;">How is your <br><span>Experience?</span></h1>
+            <p class="hero-subtitle" style="font-size: 1.1rem; max-width: 100%;">Your feedback directly shapes the future of Mercury.</p>
+            
+            <div class="stars-container" id="stars-container">
+                <i class="fa-solid fa-star star" data-value="1"></i>
+                <i class="fa-solid fa-star star" data-value="2"></i>
+                <i class="fa-solid fa-star star" data-value="3"></i>
+                <i class="fa-solid fa-star star" data-value="4"></i>
+                <i class="fa-solid fa-star star" data-value="5"></i>
+            </div>
+            
+            <textarea id="feedback-comment" class="feedback-textarea" placeholder="Tell us what you love, or what we can improve..."></textarea>
+            
+            <button id="submit-btn" class="btn-landing btn-primary-glow" style="width: 100%; border: none; padding: 1.2rem; cursor: pointer;">
+                <i class="fa-solid fa-paper-plane"></i> Submit Feedback
+            </button>
+            <div style="text-align: center; margin-top: 1.5rem;">
+                <a href="/" style="color: var(--text-muted); text-decoration: none; font-size: 0.95rem; transition: color 0.2s;">
+                    <i class="fa-solid fa-arrow-left"></i> Back to Home
+                </a>
+            </div>
+        </div>
+
+        <div class="feedback-card success-message" id="success-container">
+            <i class="fa-solid fa-circle-check"></i>
+            <h2 class="hero-title" style="font-size: 2.5rem; margin-bottom: 1rem;">Thank <span>You!</span></h2>
+            <p class="hero-subtitle" style="margin-bottom: 2.5rem;">Your feedback has been securely saved to our database and our engineering team has been notified.</p>
+            <a href="/" class="btn-landing btn-outline-glow" style="display: inline-block; text-decoration: none;">
+                <i class="fa-solid fa-arrow-left"></i> Return to Home
+            </a>
+        </div>
+    </div>
+
+    <script>
+        let currentRating = 0;
+        const stars = document.querySelectorAll('.star');
+        const submitBtn = document.getElementById('submit-btn');
+        const commentBox = document.getElementById('feedback-comment');
+        
+        // Star hover/click logic
+        stars.forEach(star => {
+            star.addEventListener('mouseover', (e) => {
+                const val = parseInt(e.target.dataset.value);
+                stars.forEach(s => {
+                    if (parseInt(s.dataset.value) <= val) {
+                        s.style.color = '#fbbf24';
+                        s.style.textShadow = '0 0 15px rgba(251, 191, 36, 0.5)';
+                    } else if (parseInt(s.dataset.value) > currentRating) {
+                        s.style.color = 'rgba(255, 255, 255, 0.1)';
+                        s.style.textShadow = 'none';
+                    }
+                });
+            });
+            
+            star.addEventListener('mouseout', () => {
+                stars.forEach(s => {
+                    if (parseInt(s.dataset.value) <= currentRating) {
+                        s.style.color = '#fbbf24';
+                        s.style.textShadow = '0 0 15px rgba(251, 191, 36, 0.5)';
+                    } else {
+                        s.style.color = 'rgba(255, 255, 255, 0.1)';
+                        s.style.textShadow = 'none';
+                    }
+                });
+            });
+            
+            star.addEventListener('click', (e) => {
+                currentRating = parseInt(e.target.dataset.value);
+                stars.forEach(s => {
+                    if (parseInt(s.dataset.value) <= currentRating) {
+                        s.classList.add('active');
+                        s.style.color = '#fbbf24';
+                        s.style.textShadow = '0 0 15px rgba(251, 191, 36, 0.5)';
+                    } else {
+                        s.classList.remove('active');
+                        s.style.color = 'rgba(255, 255, 255, 0.1)';
+                        s.style.textShadow = 'none';
+                    }
+                });
+            });
+        });
+
+        // Submit Logic
+        submitBtn.addEventListener('click', async () => {
+            if (currentRating === 0) {
+                alert("Please select a star rating first.");
+                return;
+            }
+            
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+            
+            try {
+                const res = await fetch('/api/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        rating: currentRating,
+                        comment: commentBox.value
+                    })
+                });
+                
+                if (res.ok) {
+                    document.getElementById('feedback-form-container').style.display = 'none';
+                    document.getElementById('success-container').style.display = 'block';
+                } else {
+                    const data = await res.json();
+                    alert(data.error || "Something went wrong");
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit Feedback';
+                }
+            } catch (err) {
+                alert("Network error.");
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit Feedback';
+            }
+        });
+    </script>
+</body>
+</html>

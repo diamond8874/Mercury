@@ -59,6 +59,15 @@ def init_db(db_path: Optional[str] = None):
                 is_admin INTEGER DEFAULT 0
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                rating INTEGER,
+                comment TEXT,
+                timestamp DATETIME
+            )
+        """)
         conn.commit()
 
 def get_user_by_id(user_id: str, db_path: Optional[str] = None) -> Optional[User]:

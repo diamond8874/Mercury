@@ -3,585 +3,289 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mercury DataCleaner - AI-Powered Chat & Analytics</title>
+    <title>Mercury DataCleaner | Clean Data at the Speed of Thought</title>
+    
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Styling -->
+    
+    <!-- Styles -->
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="landing.css?v=2">
 </head>
-<body>
-    <div class="app-container">
-        <!-- Sidebar Navigation & History -->
-        <aside class="sidebar">
-            <div class="logo-area">
-                <div class="logo-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
-                <div class="logo-text">
-                    <h1>Mercury</h1>
-                    <span>DataCleaner Pro</span>
-                </div>
-            </div>
+<body class="dark-theme landing-body">
 
-            <!-- New Session Button -->
-            <button class="btn btn-primary new-session-btn" id="new-analysis-btn">
-                <i class="fa-solid fa-plus"></i> New Analysis
-            </button>
-            
-            <!-- History section -->
-            <div class="history-section">
-                <h3><i class="fa-solid fa-clock-rotate-left"></i> History</h3>
-                <div class="sessions-list" id="sessions-list">
-                    <!-- Session history items populated dynamically -->
-                    <div class="no-history">No past analyses</div>
-                </div>
-            </div>
-
-            <div class="sidebar-footer">
-                <button class="settings-btn" id="open-settings-btn">
-                    <i class="fa-solid fa-gear"></i> LLM Configuration
-                </button>
-            </div>
-        </aside>
-
-        <!-- Main Content Workspace -->
-        <main class="workspace">
-            <!-- Header bar -->
-            <header class="workspace-header">
-                <div class="header-title">
-                    <h2 id="workspace-title">Data Upload & Objective</h2>
-                    <p id="workspace-subtitle">Provide your raw dataset file and state what model you plan to train.</p>
-                </div>
-                
-                <div class="header-actions" style="display: flex; align-items: center; gap: 1rem;">
-                    <div class="api-key-status" id="api-status">
-                        <span class="status-indicator warning"></span>
-                        <span class="status-text">Default Key Active</span>
-                    </div>
-
-                    <!-- User Profile & Authentication Area -->
-                    <div class="user-auth-area" id="user-auth-area">
-                        <div class="user-profile-badge hidden" id="user-profile-badge">
-                            <span class="user-avatar"><i class="fa-solid fa-circle-user"></i></span>
-                            <span class="user-name" id="user-name-display">Guest</span>
-                            <button class="logout-icon-btn" id="logout-btn" title="Sign Out">
-                                <i class="fa-solid fa-right-from-bracket"></i>
-                            </button>
-                        </div>
-                        <button class="btn btn-primary btn-sm" id="open-auth-modal-btn">
-                            <i class="fa-solid fa-right-to-bracket"></i> Sign In
-                        </button>
-                    </div>
-                </div>
-            </header>
-
-            <div class="content-area">
-                <!-- STEP 1: UPLOAD AND INITIAL GOAL (Full screen at start) -->
-                <section class="step-section active" id="section-step-1">
-                    <div class="glass-card upload-card">
-                        <div class="drop-zone" id="file-drop-zone">
-                            <input type="file" id="file-input" accept=".xlsx, .xls, .csv" class="hidden">
-                            <div class="drop-zone-content">
-                                <i class="fa-solid fa-file-excel file-icon"></i>
-                                <h3>Drag & drop your Excel/CSV here</h3>
-                                <p>Supports .xlsx, .xls and .csv (Max 200MB)</p>
-                                <button class="btn btn-secondary select-file-btn">Choose File</button>
-                            </div>
-                        </div>
-                        
-                        <div class="uploaded-file-details hidden" id="file-details-container">
-                            <div class="file-info-header">
-                                <div class="file-meta">
-                                    <i class="fa-solid fa-file-circle-check info-icon"></i>
-                                    <div>
-                                        <h4 id="detail-filename">filename.xlsx</h4>
-                                        <p id="detail-filesize">0 rows x 0 columns</p>
-                                    </div>
-                                </div>
-                                <button class="btn-icon delete-file-btn" id="remove-file-btn">
-                                    <i class="fa-solid fa-trash-can"></i>
-                                </button>
-                            </div>
-                            
-                            <div class="sheet-selector-container hidden" id="sheet-select-wrapper">
-                                <label for="sheet-select">Select Sheet to Process:</label>
-                                <select id="sheet-select" class="form-select"></select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="glass-card goal-card">
-                        <h3><i class="fa-solid fa-bullseye icon-prefix"></i> What is your Machine Learning or Analysis goal?</h3>
-                        <p class="subtitle">AI will parse your schema and remove irrelevant data to perfectly align with this goal.</p>
-                        
-                        <div class="goal-input-wrapper" style="position: relative;">
-                            <textarea id="goal-input" placeholder="Example: I want to build a model to predict customer churn based on their payment history..."></textarea>
-                            <div id="goal-autocomplete" class="autocomplete-dropdown autocomplete-up hidden"></div>
-                        </div>
-                        
-                        <div class="industry-packs-container">
-                            <span class="preset-label">Industry Starter Packs:</span>
-                            <div class="industry-cards">
-                                <button class="preset-btn industry-card" data-goal="Remove all personal info and fix the date formats.">
-                                    <i class="fa-solid fa-hospital"></i> <b>Healthcare</b>
-                                </button>
-                                <button class="preset-btn industry-card" data-goal="Fill empty transaction amounts with 0 and fix currencies.">
-                                    <i class="fa-solid fa-building-columns"></i> <b>Finance</b>
-                                </button>
-                                <button class="preset-btn industry-card" data-goal="Clean up product categories and fix missing prices.">
-                                    <i class="fa-solid fa-cart-shopping"></i> <b>E-Commerce</b>
-                                </button>
-                                <button class="preset-btn industry-card" data-goal="Drop empty columns and fill missing numbers with the average.">
-                                    <i class="fa-solid fa-robot"></i> <b>Machine Learning</b>
-                                </button>
-                                <button class="preset-btn industry-card" data-goal="Standardize email addresses and remove duplicate customer records.">
-                                    <i class="fa-solid fa-chart-pie"></i> <b>Marketing</b>
-                                </button>
-                                <button class="preset-btn industry-card" data-goal="Anonymize employee names and calculate age from birth dates.">
-                                    <i class="fa-solid fa-users"></i> <b>Human Resources</b>
-                                </button>
-                                <button class="preset-btn industry-card" data-goal="Standardize delivery locations and fill missing tracking numbers.">
-                                    <i class="fa-solid fa-truck"></i> <b>Logistics</b>
-                                </button>
-                                <button class="preset-btn industry-card" data-goal="Trim whitespace from support tickets and extract emails from text.">
-                                    <i class="fa-solid fa-headset"></i> <b>Customer Support</b>
-                                </button>
-                                <button class="preset-btn industry-card" data-goal="Fill missing square footage with the median and standardize addresses.">
-                                    <i class="fa-solid fa-house"></i> <b>Real Estate</b>
-                                </button>
-                                <button class="preset-btn industry-card" data-goal="Remove extreme outliers, drop missing rows, and encode categories.">
-                                    <i class="fa-solid fa-flask"></i> <b>Data Science</b>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="action-footer">
-                        <button class="btn btn-primary" id="analyze-data-btn" disabled>
-                            Start AI Analysis <i class="fa-solid fa-arrow-right icon-suffix"></i>
-                        </button>
-                        <button class="btn btn-secondary" id="process-data-btn" disabled>
-                            Process Data <i class="fa-solid fa-cogs icon-suffix"></i>
-                        </button>
-                    </div>
-                </section>
-
-                <!-- STEP 2 & 3: SPLIT-SCREEN CHAT & DATA DASHBOARD -->
-                <section class="step-section" id="section-split-dashboard">
-                    <div class="split-layout">
-                        <!-- Left Panel: Conversational AI Chat -->
-                        <div class="chat-panel glass-card">
-                            <div class="chat-header">
-                                <h3><i class="fa-solid fa-comments"></i> AI Data Assistant</h3>
-                                <span class="badge" id="chat-session-badge">Session Active</span>
-                            </div>
-                            
-                            <!-- Messages scrollable area -->
-                            <div class="chat-messages" id="chat-messages">
-                                <!-- Populated dynamically -->
-                            </div>
-                            
-                            <!-- Suggested chips -->
-                            <div class="chat-suggestions-wrapper">
-                                <div class="chat-suggestions" id="chat-suggestions">
-                                    <button class="suggestion-chip" data-text="Explain why column Age is kept">Why is Age kept?</button>
-                                    <button class="suggestion-chip" data-text="Also drop columns containing names">Drop name columns</button>
-                                    <button class="suggestion-chip" data-text="Generate PDF Report">Generate PDF Report</button>
-                                </div>
-                            </div>
-                            
-                            <!-- Chat Input bar -->
-                            <div class="chat-input-wrapper" style="position: relative;">
-                                <textarea id="chat-input" placeholder="Type a message (e.g. 'Drop Age', 'Make report')..." rows="1"></textarea>
-                                <div id="chat-autocomplete" class="autocomplete-dropdown autocomplete-up hidden"></div>
-                                <button class="btn-icon send-msg-btn" id="chat-send-btn">
-                                    <i class="fa-solid fa-paper-plane"></i>
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Right Panel: Workspace Tabs -->
-                        <div class="workspace-panel">
-                            <!-- Tabs Bar -->
-                            <div class="tabs-bar">
-                                <button class="tab-btn active" data-tab="tab-schema">
-                                    <i class="fa-solid fa-gears"></i> Schema Actions
-                                </button>
-                                <button class="tab-btn" data-tab="tab-preview" id="tab-btn-preview">
-                                    <i class="fa-solid fa-table"></i> Data Preview
-                                </button>
-                                <button class="tab-btn" data-tab="tab-viz" id="tab-btn-viz">
-                                    <i class="fa-solid fa-chart-pie"></i> Visualizations
-                                </button>
-                                <button class="tab-btn" data-tab="tab-export" id="tab-btn-export" disabled>
-                                    <i class="fa-solid fa-file-export"></i> Export Report
-                                </button>
-                            </div>
-                            
-                            <!-- Tab Content area -->
-                            <div class="tab-content-area">
-                                <!-- TAB 1: Schema Editor -->
-                                <div class="tab-pane active" id="tab-schema">
-                                    <div class="pane-header">
-                                        <div class="rec-summary-stats">
-                                            <div class="stat-badge"><span class="badge-num" id="rec-total-cols">0</span><span class="badge-label">Total</span></div>
-                                            <div class="stat-badge keep-badge"><span class="badge-num" id="rec-keep-cols">0</span><span class="badge-label">Keep</span></div>
-                                            <div class="stat-badge drop-badge"><span class="badge-num" id="rec-drop-cols">0</span><span class="badge-label">Drop</span></div>
-                                            <div class="stat-badge transform-badge"><span class="badge-num" id="rec-transform-cols">0</span><span class="badge-label">Trans</span></div>
-                                        </div>
-                                        <span class="schema-auto-label"><i class="fa-solid fa-bolt"></i> Auto-processing on change</span>
-                                    </div>
-                                    <div class="grid-columns" id="columns-recommendation-grid">
-                                        <!-- Column cards populated dynamically -->
-                                    </div>
-                                </div>
-                                
-                                <!-- TAB 2: Clean Preview -->
-                                <div class="tab-pane" id="tab-preview">
-                                    <!-- Before / After Toggle & Status Toolbar -->
-                                    <div class="preview-controls-bar">
-                                        <div class="preview-mode-toggle-group">
-                                            <button type="button" class="preview-mode-btn" id="preview-mode-before">
-                                                <i class="fa-solid fa-clock-rotate-left"></i> Before (Original Data)
-                                            </button>
-                                            <button type="button" class="preview-mode-btn active" id="preview-mode-after">
-                                                <i class="fa-solid fa-wand-magic-sparkles"></i> After (Cleaned Data)
-                                            </button>
-                                        </div>
-                                        <div class="preview-indicators">
-                                            <span class="preview-badge" id="preview-row-count-badge">
-                                                <i class="fa-solid fa-table-rows"></i> Showing 15 Rows
-                                            </span>
-                                            <span class="preview-diff-badge hidden" id="preview-diff-indicator">
-                                                <i class="fa-solid fa-circle-check"></i> <span id="preview-diff-count">0</span> changes highlighted
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    <!-- Table Container -->
-                                    <div class="table-scroll-container">
-                                        <table class="preview-table" id="cleaned-preview-table">
-                                            <thead></thead>
-                                            <tbody></tbody>
-                                        </table>
-                                    </div>
-
-                                    <!-- Applied Changes & Cleaning Summary Below Preview -->
-                                    <div class="preview-changes-card" id="preview-applied-changes-card">
-                                        <div class="changes-card-header">
-                                            <div class="changes-card-title">
-                                                <i class="fa-solid fa-clipboard-check"></i>
-                                                <h4>Applied Transformations &amp; Cleaning Summary</h4>
-                                            </div>
-                                            <span class="changes-status-badge" id="preview-changes-status">No Changes Applied Yet</span>
-                                        </div>
-                                        <div class="changes-metrics-grid" id="preview-changes-metrics">
-                                            <!-- Dynamically filled with metrics -->
-                                        </div>
-                                        <div class="changes-details-list" id="preview-changes-details">
-                                            <!-- Dynamically filled with applied rules and descriptions -->
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- TAB 3: Charts & PowerBI Visual Gallery -->
-                                <div class="tab-pane" id="tab-viz">
-                                    <div class="bi-builder-container">
-                                        <aside class="bi-sidebar" aria-label="Chart controls">
-                                            <div class="viz-sidebar-heading">
-                                                <div>
-                                                    <span class="viz-eyebrow">VISUAL EXPLORER</span>
-                                                    <h3>Build a chart</h3>
-                                                </div>
-                                                <span class="pinned-charts-badge" id="pinned-charts-badge" title="Charts saved to your report">
-                                                    <i class="fa-solid fa-thumbtack"></i>
-                                                    <span id="pinned-count-num">0</span>
-                                                </span>
-                                            </div>
-                                            <div class="viz-picker-heading"><span>Chart type</span><span>12 visuals</span></div>
-                                            <div class="bi-visual-grid" id="ai-quick-viz-grid">
-                                                <button type="button" class="bi-viz-btn" data-category="trend" data-type="line" title="Line chart"><i class="fa-solid fa-chart-line"></i><span>Line</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="trend" data-type="area" title="Area chart"><i class="fa-solid fa-chart-area"></i><span>Area</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="comparison" data-type="bar" title="Bar chart"><i class="fa-solid fa-chart-bar"></i><span>Bar</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="trend" data-type="column" title="Column chart"><i class="fa-solid fa-chart-column"></i><span>Column</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="part_to_whole" data-type="pie" title="Pie chart"><i class="fa-solid fa-chart-pie"></i><span>Pie</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="part_to_whole" data-type="donut" title="Donut chart"><i class="fa-solid fa-circle-notch"></i><span>Donut</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="part_to_whole" data-type="treemap" title="Treemap"><i class="fa-solid fa-table-cells-large"></i><span>Treemap</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="change_flow" data-type="waterfall" title="Waterfall chart"><i class="fa-solid fa-water"></i><span>Waterfall</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="relationship" data-type="scatter" title="Scatter plot"><i class="fa-solid fa-braille"></i><span>Scatter</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="distribution" data-type="histogram" title="Histogram"><i class="fa-solid fa-signal"></i><span>Histogram</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="single_metric" data-type="gauge" title="Gauge"><i class="fa-solid fa-gauge-high"></i><span>Gauge</span></button>
-                                                <button type="button" class="bi-viz-btn" data-category="geo" data-type="bubble_map" title="Map"><i class="fa-solid fa-earth-americas"></i><span>Map</span></button>
-                                            </div>
-                                            <div class="ai-viz-prompt-area">
-                                                <label for="ai-viz-input"><i class="fa-solid fa-wand-magic-sparkles"></i> Describe a chart</label>
-                                                <textarea id="ai-viz-input" class="chat-input" placeholder="Compare revenue by region"></textarea>
-                                                <button class="btn btn-primary" id="ai-viz-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate chart</button>
-                                            </div>
-                                        </aside>
-                                        <section class="bi-canvas" aria-label="Chart workspace">
-                                            <div id="dashboard-charts-grid" class="bi-chart-display">
-                                                <div class="bi-placeholder">
-                                                    <span class="bi-placeholder-icon"><i class="fa-solid fa-chart-simple"></i></span>
-                                                    <p class="viz-eyebrow">CHART WORKSPACE</p>
-                                                    <h3>Your next insight starts here.</h3>
-                                                    <p>Select a chart type or describe the view you need.</p>
-                                                </div>
-                                            </div>
-                                        </section>
-                                    </div>
-                                </div>
-                                
-                                <!-- TAB 4: Export Center -->
-                                <div class="tab-pane" id="tab-export">
-                                    <div class="export-cards-wrapper">
-                                        <!-- Clean Excel Card -->
-                                        <div class="glass-card export-card">
-                                            <i class="fa-solid fa-file-excel export-icon excel"></i>
-                                            <h3>Cleaned Excel Dataset</h3>
-                                            <p>Download the fully cleaned and imputed dataset in Excel format.</p>
-                                            <a href="#" class="btn btn-primary download-file-link" id="download-btn" target="_blank">
-                                                <i class="fa-solid fa-download"></i> Download Excel
-                                            </a>
-                                        </div>
-                                        
-                                        <!-- Clean PDF Card -->
-                                        <div class="glass-card export-card">
-                                            <i class="fa-solid fa-file-pdf export-icon pdf"></i>
-                                            <h3>Professional Diagnostics Report</h3>
-                                            <p>Generate a professional analytics report in PDF format styled using the <b>Lora</b> font, including tables and Matplotlib diagnostic figures.</p>
-                                            <button class="btn btn-emerald" id="generate-pdf-btn">
-                                                <i class="fa-solid fa-gears"></i> Compile PDF Report
-                                            </button>
-                                            <a href="#" class="btn btn-secondary hidden" id="download-pdf-link" target="_blank">
-                                                <i class="fa-solid fa-download"></i> Get PDF Report
-                                            </a>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="stats-box glass-card" id="process-stats-box">
-                                        <h4>Applied Operations Summary</h4>
-                                        <div class="stats-flex">
-                                            <div>
-                                                <span>Rows:</span> <b id="stat-final-rows">0</b> <small id="stat-initial-rows"></small>
-                                            </div>
-                                            <div>
-                                                <span>Columns:</span> <b id="stat-final-cols">0</b> <small id="stat-dropped-cols"></small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-            </div>
-        </main>
-    </div>
-
-    <!-- API SETTINGS MODAL -->
-    <div class="modal-overlay hidden" id="settings-modal">
-        <div class="glass-card modal-content">
-            <div class="modal-header">
-                <h3><i class="fa-solid fa-key"></i> Settings</h3>
-                <button class="btn-icon" id="close-settings-btn"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="settings-provider">LLM Provider:</label>
-                    <select id="settings-provider" class="form-select" style="width: 100%; padding: 0.75rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
-                        <option value="">Default (Groq / Auto-detect)</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="anthropic">Anthropic (Claude)</option>
-                        <option value="gemini">Google (Gemini)</option>
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="ollama">Ollama (Local)</option>
-                        <option value="nvidia">Nvidia API</option>
-                        <option value="groq">Groq API</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="settings-model">LLM Model:</label>
-                    <p class="form-help" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Type your preferred model identifier (e.g., gpt-4o, claude-3-7-sonnet, gemini-2.5-flash, llama3).</p>
-                    <input type="text" id="settings-model" placeholder="e.g. z-ai/glm-5.2" style="width: 100%; padding: 0.75rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
-                </div>
-
-                <div class="form-group">
-                    <label for="settings-api-key">API Key Override:</label>
-                    <p class="form-help" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Enter your API key. If left blank, environment variables (e.g., ANTHROPIC_API_KEY) will be used.</p>
-                    <div class="input-password-wrapper" style="position: relative;">
-                        <input type="password" id="settings-api-key" placeholder="API Key..." style="width: 100%; padding: 0.75rem; padding-right: 2.5rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
-                        <button class="btn-icon" id="toggle-key-visibility" style="position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer;"><i class="fa-solid fa-eye"></i></button>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="settings-base-url">Custom Base URL (Optional):</label>
-                    <p class="form-help" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem;">Useful for Ollama or custom API proxies.</p>
-                    <input type="text" id="settings-base-url" placeholder="e.g. http://localhost:11434" style="width: 100%; padding: 0.75rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); color: white; border: 1px solid var(--border-glass);">
-                </div>
-
-                <!-- Data Privacy Notice -->
-                <div style="background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.35); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; display: flex; gap: 0.6rem; align-items: flex-start;">
-                    <i class="fa-solid fa-triangle-exclamation" style="color: #f59e0b; margin-top: 2px; flex-shrink: 0;"></i>
-                    <p style="margin: 0; font-size: 0.75rem; color: #fcd34d; line-height: 1.5;">
-                        <strong>Data Notice:</strong> When you click <em>Analyze</em> or send a chat message, your dataset's column names, data types, null counts, and a small sample of values are sent to the selected LLM provider for analysis. No full row data is transmitted. Your API key is stored in session memory only and is cleared when you close the tab.
-                    </p>
-                </div>
-            </div>
-            
-            <div class="modal-footer">
-                <button class="btn btn-secondary" id="cancel-settings-btn">Cancel</button>
-                <button class="btn btn-primary" id="save-settings-btn">Save Settings</button>
-            </div>
+    <!-- NAVBAR -->
+    <nav class="landing-nav">
+        <a href="/" class="landing-logo">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Mercury
+        </a>
+        <div class="nav-links" style="display: flex; gap: 2rem; align-items: center; margin-left: auto; margin-right: 2rem;">
+            <a href="/" class="nav-link">Home</a>
+            <a href="#about" class="nav-link">About</a>
+            <a href="#pricing" class="nav-link">Subscription</a>
+            <a href="/dashboard" class="nav-link">Settings</a>
         </div>
-    </div>
+        <div class="nav-actions">
+            <a href="/feedback" class="nav-link" style="color: var(--primary);"><i class="fa-solid fa-comment-dots"></i> Feedback</a>
+            <a href="/dashboard" class="nav-link">Sign In</a>
+            <a href="/dashboard" class="btn-landing btn-primary-glow" style="padding: 0.5rem 1.2rem; font-size: 0.95rem;">Get Started</a>
+        </div>
+    </nav>
 
-    <!-- LOADING SPINNER OVERLAY -->
-    <div class="loading-overlay hidden" id="global-loader">
-        <div class="loader-content">
-            <!-- Wave Loader Animation -->
-            <div class="wave-loader">
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
-                <span class="wave-bar"></span>
+    <!-- HERO SECTION -->
+    <section class="hero-section">
+        <video autoplay loop muted playsinline class="hero-bg-video">
+            <source src="assets/hero-bg.mp4" type="video/mp4">
+        </video>
+        <div class="hero-bg-overlay"></div>
+        <div class="hero-badge">
+            <i class="fa-solid fa-bolt"></i> Mercury 2.0 Now Available
+        </div>
+        <h1 class="hero-title">Clean Data at the <br><span>Speed of Thought</span></h1>
+        <p class="hero-subtitle">
+            Upload your messy spreadsheets and just type what you want. Mercury's AI engine instantly understands your intent, cleans the data, and visualizes it—without writing a single line of code.
+        </p>
+        <div class="hero-cta">
+            <a href="/dashboard" class="btn-landing btn-primary-glow">
+                Start for Free <i class="fa-solid fa-arrow-right"></i>
+            </a>
+            <a href="#demo" class="btn-landing btn-outline-glow">
+                <i class="fa-solid fa-circle-play"></i> View Demo
+            </a>
+        </div>
+
+        <!-- MAC WINDOW MOCKUP (Video Container) -->
+        <div class="mockup-container" id="demo">
+            <div class="windows-window-mockup" style="background: #0b0f19; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); overflow: hidden; position: relative;">
+                <div class="windows-top-bar" style="background: #1e1e1e; height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <div style="color: rgba(255,255,255,0.5); font-size: 0.75rem; font-family: sans-serif; display: flex; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-wand-magic-sparkles" style="color: var(--primary)"></i> Mercury Dashboard
+                    </div>
+                    <div style="display: flex; gap: 15px; color: rgba(255,255,255,0.4); font-size: 0.7rem;">
+                        <i class="fa-solid fa-minus"></i>
+                        <i class="fa-regular fa-square"></i>
+                        <i class="fa-solid fa-xmark"></i>
+                    </div>
+                </div>
+                <div class="windows-content" style="position: relative; width: 100%; padding-top: 56.25%; background: #0b0f19;">
+                    <div class="slider-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; overflow: hidden;">
+                        <div class="slider-slides" id="demo-slider-slides" style="display: flex; height: 100%; transition: transform 0.4s ease-in-out;">
+                            <img src="slide1.png" style="width: 100%; height: 100%; object-fit: contain; flex-shrink: 0;">
+                            <img src="slide2.png" style="width: 100%; height: 100%; object-fit: contain; flex-shrink: 0;">
+                            <img src="slide3.png" style="width: 100%; height: 100%; object-fit: contain; flex-shrink: 0;">
+                            <img src="slide4.png" style="width: 100%; height: 100%; object-fit: contain; flex-shrink: 0;">
+                            <img src="slide5.png" style="width: 100%; height: 100%; object-fit: contain; flex-shrink: 0;">
+                        </div>
+                        </div>
+                    
+                </div>
             </div>
-            
-            <h3 id="loader-title">Analyzing data...</h3>
-            <p id="loader-subtitle">Please wait, AI model is examining your schema.</p>
-
-            <!-- Progressive Progress Bar -->
-            <div class="progress-bar-container">
-                <div class="progress-bar-fill" id="loader-progress-fill" style="width: 0%;"></div>
-            </div>
-            <div class="progress-bar-percent" id="loader-progress-percent">0%</div>
-
-            <!-- Progressive Steps Tracker -->
-            <div class="progress-steps-list">
-                <div class="progress-step-item" id="step-marker-1">
-                    <span class="step-dot"></span>
-                    <span class="step-label">Reading & parsing dataset file</span>
-                </div>
-                <div class="progress-step-item" id="step-marker-2">
-                    <span class="step-dot"></span>
-                    <span class="step-label">Profiling column statistics</span>
-                </div>
-                <div class="progress-step-item" id="step-marker-3">
-                    <span class="step-dot"></span>
-                    <span class="step-label">Consulting AI model</span>
-                </div>
-                <div class="progress-step-item" id="step-marker-4">
-                    <span class="step-dot"></span>
-                    <span class="step-label">Parsing AI response & saving schema</span>
+                    <!-- Actual video tag commented out for now:
+                    <video autoplay loop muted playsinline>
+                        <source src="assets/mercury-demo.mp4" type="video/mp4">
+                    </video>
+                    -->
                 </div>
             </div>
         </div>
-    </div>
+    </section>
 
-
-    <!-- Chart Configuration Modal -->
-    <div class="modal-overlay hidden" id="chart-config-modal">
-        <div class="glass-card modal-content" style="max-width: 480px; width: 90%;">
-            <div class="modal-header">
-                <h3><i class="fa-solid fa-chart-line" id="modal-chart-icon" style="color: var(--primary-light);"></i> <span id="modal-chart-title">Configure Visual</span></h3>
-                <button class="btn-icon close-modal-btn" id="close-chart-modal-btn"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="modal-body" style="display: flex; flex-direction: column; gap: 14px; padding: 15px 0;">
-                <input type="hidden" id="modal-chart-category">
-                <input type="hidden" id="modal-chart-type">
-
-                <div class="form-group">
-                    <label for="modal-x-col" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.85rem;"><i class="fa-solid fa-font"></i> <span id="modal-x-label">X-Axis / Category Column</span>:</label>
-                    <select id="modal-x-col" class="form-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(15,23,42,0.8); color: white; border: 1px solid rgba(255,255,255,0.15);"></select>
+    <!-- INTERACTIVE PLAYGROUND SECTION -->
+    <section class="playground-section">
+        <h2 class="section-title">Experience the Magic. Zero Setup.</h2>
+        <div class="playground-grid">
+            <!-- Left Pane: Fake Chat UI -->
+            <div class="playground-panel">
+                <div class="playground-header">
+                    <i class="fa-solid fa-terminal"></i> Terminal Command
                 </div>
-                <div class="form-group">
-                    <label for="modal-y-col" style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.85rem;"><i class="fa-solid fa-arrow-trend-up"></i> <span id="modal-y-label">Y-Axis / Metric Column</span>:</label>
-                    <select id="modal-y-col" class="form-select" style="width: 100%; padding: 8px; border-radius: 6px; background: rgba(15,23,42,0.8); color: white; border: 1px solid rgba(255,255,255,0.15);"></select>
-                </div>
-            </div>
-            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; padding-top: 10px;">
-                <button class="btn btn-secondary" id="cancel-chart-modal-btn">Cancel</button>
-                <button class="btn btn-primary" id="render-chart-modal-btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate Visual</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- AUTHENTICATION MODAL (SIGN IN / REGISTER) -->
-    <div class="modal-overlay hidden" id="auth-modal">
-        <div class="glass-card modal-content auth-modal-card">
-            <div class="modal-header auth-modal-header">
-                <div class="auth-brand">
-                    <div class="logo-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
-                    <div>
-                        <h3 id="auth-modal-title">Welcome to Mercury</h3>
-                        <p class="auth-modal-subtitle" id="auth-modal-subtitle">Sign in to access your sessions and datasets</p>
-                    </div>
-                </div>
-                <button class="btn-icon close-modal-btn hidden" id="close-auth-modal-btn"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-
-            <!-- Tab Switcher: Sign In vs Create Account -->
-            <div class="auth-tabs">
-                <button class="auth-tab-btn active" id="auth-tab-login" type="button">
-                    <i class="fa-solid fa-right-to-bracket"></i> Sign In
-                </button>
-                <button class="auth-tab-btn" id="auth-tab-register" type="button">
-                    <i class="fa-solid fa-user-plus"></i> Create Account
-                </button>
-            </div>
-
-            <form id="auth-form" class="auth-form">
-                <!-- Inline Error Alert -->
-                <div class="auth-error-alert hidden" id="auth-error-alert">
-                    <i class="fa-solid fa-circle-exclamation"></i>
-                    <span id="auth-error-text">Invalid credentials</span>
-                </div>
-
-                <div class="form-group">
-                    <label for="auth-username"><i class="fa-solid fa-user"></i> Username</label>
-                    <input type="text" id="auth-username" class="form-input" placeholder="Enter your username" autocomplete="username" required minlength="3">
-                </div>
-
-                <div class="form-group">
-                    <label for="auth-password"><i class="fa-solid fa-lock"></i> Password</label>
-                    <div class="input-password-wrapper" style="position: relative;">
-                        <input type="password" id="auth-password" class="form-input" placeholder="Enter your password" autocomplete="current-password" required minlength="6" style="width: 100%; padding-right: 2.5rem;">
-                        <button type="button" class="btn-icon" id="toggle-auth-password" style="position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer;">
-                            <i class="fa-solid fa-eye"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="form-group auth-remember-wrapper" id="auth-remember-row">
-                    <label class="remember-checkbox-label">
-                        <input type="checkbox" id="auth-remember" checked>
-                        <span>Keep me signed in (14 days)</span>
-                    </label>
-                </div>
-
-                <div class="modal-footer auth-footer">
-                    <button type="submit" class="btn btn-primary auth-submit-btn" id="auth-submit-btn">
-                        <span id="auth-submit-text">Sign In</span>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">Type an intent to clean the dataset instantly.</p>
+                <div class="mock-input-group">
+                    <input type="text" id="mock-prompt-input" class="mock-input" value="Clean the emails and format names properly">
+                    <button class="btn btn-primary" id="mock-run-btn" style="border-radius: 8px;">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Run
                     </button>
                 </div>
-            </form>
+            </div>
 
-            <div class="auth-toggle-note">
-                <span id="auth-toggle-prompt">Don't have an account?</span>
-                <a href="#" id="auth-toggle-link">Create one now</a>
+            <!-- Right Pane: Fake Dataset -->
+            <div class="playground-panel">
+                <div class="playground-header">
+                    <i class="fa-solid fa-table"></i> Live Dataset
+                </div>
+                <div class="mock-table-wrapper">
+                    <i class="fa-solid fa-spinner fa-spin mock-loading hidden" id="mock-loading"></i>
+                    <table class="mock-table">
+                        <thead>
+                            <tr><th>ID</th><th>Name</th><th>Age</th><th>Email</th></tr>
+                        </thead>
+                        <tbody id="mock-table-body" style="transition: opacity 0.3s;">
+                            <tr><td>1</td><td>john_doe_99</td><td>32.0</td><td>JOHN@EXAMPLE.COM</td></tr>
+                            <tr><td>2</td><td>  Jane Smith  </td><td>28.5</td><td>jane.s(at)example.com</td></tr>
+                            <tr><td>3</td><td>bob johnson</td><td>-45</td><td>bob.j@example.com</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
-    </div>
+    </section>
 
-    <!-- Application Script -->
-    <script src="app.js"></script>
+    <!-- FEATURE SLIDERS SECTION -->
+    <section class="features-section">
+        <h2 class="section-title">Built for Enterprise. Priced for Indie.</h2>
+        <div class="slider-container">
+            <div class="feature-card">
+                <div class="feature-icon"><i class="fa-solid fa-bolt"></i></div>
+                <h3 class="feature-title">Time Efficiency</h3>
+                <p class="feature-desc">Stop writing pandas boilerplate. Mercury uses a powerful Natural Language intent parser to clean millions of rows exactly the way you describe, instantly.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><i class="fa-solid fa-piggy-bank"></i></div>
+                <h3 class="feature-title">Cost Efficiency</h3>
+                <p class="feature-desc">Forget expensive cloud databases. Mercury is designed to run entirely locally with zero overhead. State is managed locally, saving thousands in AWS costs.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><i class="fa-solid fa-shield-halved"></i></div>
+                <h3 class="feature-title">Enterprise Safety</h3>
+                <p class="feature-desc">No raw code injection. No dangerous <code>eval()</code> calls. Every AI command is securely mapped to a sandboxed Operation Registry for 100% deterministic safety.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- TRUST MARQUEE SECTION -->
+    <section class="trust-section">
+        <div class="trust-label">Trusted by innovative data teams</div>
+        <div class="marquee">
+            <div class="marquee-content">
+                <span class="marquee-logo"><i class="fa-brands fa-aws"></i> Amazon Web Services</span>
+                <span class="marquee-logo"><i class="fa-brands fa-microsoft"></i> Microsoft</span>
+                <span class="marquee-logo"><i class="fa-brands fa-google"></i> Google Cloud</span>
+                <span class="marquee-logo"><i class="fa-brands fa-stripe"></i> Stripe</span>
+                <span class="marquee-logo"><i class="fa-brands fa-spotify"></i> Spotify</span>
+            </div>
+            <!-- Duplicate for seamless loop -->
+            <div class="marquee-content">
+                <span class="marquee-logo"><i class="fa-brands fa-aws"></i> Amazon Web Services</span>
+                <span class="marquee-logo"><i class="fa-brands fa-microsoft"></i> Microsoft</span>
+                <span class="marquee-logo"><i class="fa-brands fa-google"></i> Google Cloud</span>
+                <span class="marquee-logo"><i class="fa-brands fa-stripe"></i> Stripe</span>
+                <span class="marquee-logo"><i class="fa-brands fa-spotify"></i> Spotify</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- TESTIMONIALS SECTION -->
+    <section class="testimonials-section">
+        <h2 class="section-title">What Data Teams Are Saying</h2>
+        <div class="testimonial-grid">
+            <div class="testimonial-card">
+                <div class="stars">
+                    <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
+                </div>
+                <p class="testimonial-text">"Mercury completely replaced our Pandas boilerplate scripts. It saves our data scientists about 10 hours a week just in data formatting."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">S</div>
+                    <div class="author-info">
+                        <h4>Sarah Jenkins</h4>
+                        <p>Lead Data Engineer, FinTech Corp</p>
+                    </div>
+                </div>
+            </div>
+            <div class="testimonial-card">
+                <div class="stars">
+                    <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
+                </div>
+                <p class="testimonial-text">"The fact that it runs locally and costs absolutely nothing in cloud compute makes this the best AI tool we've ever adopted."</p>
+                <div class="testimonial-author">
+                    <div class="author-avatar">M</div>
+                    <div class="author-info">
+                        <h4>Marcus Chen</h4>
+                        <p>CTO, StartupX</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ ACCORDION SECTION -->
+    <section class="faq-section">
+        <h2 class="section-title">Frequently Asked Questions</h2>
+        <div class="faq-container">
+            <details class="faq-item">
+                <summary>Is my data secure?</summary>
+                <div class="faq-content">
+                    Yes. Mercury processes all dataset transformations locally. We do not upload your CSV files to any external AI models for training, and everything remains on your local server.
+                </div>
+            </details>
+            <details class="faq-item">
+                <summary>Is this really free?</summary>
+                <div class="faq-content">
+                    Yes! Because we utilize local SQLite architecture instead of heavy cloud databases, we are able to provide this tool at absolutely zero cost to you.
+                </div>
+            </details>
+            <details class="faq-item">
+                <summary>Do I need to know Python or Pandas?</summary>
+                <div class="faq-content">
+                    Not at all. You can just type "remove all rows where age is negative" and our deterministic intent engine handles the exact Pandas logic for you safely.
+                </div>
+            </details>
+        </div>
+    </section>
+
+    
+    <!-- PRODUCTION FOOTER -->
+    <footer style="background: #06080d; border-top: 1px solid rgba(255,255,255,0.05); padding: 5rem 2rem 2rem 2rem; margin-top: 4rem;">
+        <div style="max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 3rem;">
+            <div>
+                <a href="/" class="landing-logo" style="display: inline-block; margin-bottom: 1rem; text-decoration: none;">
+                    <i class="fa-solid fa-wand-magic-sparkles" style="color: var(--primary)"></i> <span style="color: white; font-weight: bold;">Mercury</span>
+                </a>
+                <p style="color: rgba(255,255,255,0.5); font-size: 0.9rem; line-height: 1.6;">
+                    Clean data at the speed of thought. The ultimate AI-powered data preparation and analysis tool for modern teams.
+                </p>
+                <div style="display: flex; gap: 1.2rem; margin-top: 1.5rem;">
+                    <a href="#" style="color: rgba(255,255,255,0.5); font-size: 1.2rem; transition: color 0.3s;"><i class="fa-brands fa-twitter"></i></a>
+                    <a href="#" style="color: rgba(255,255,255,0.5); font-size: 1.2rem; transition: color 0.3s;"><i class="fa-brands fa-github"></i></a>
+                    <a href="#" style="color: rgba(255,255,255,0.5); font-size: 1.2rem; transition: color 0.3s;"><i class="fa-brands fa-discord"></i></a>
+                </div>
+            </div>
+            <div>
+                <h4 style="color: white; font-weight: 600; margin-bottom: 1.5rem;">Product</h4>
+                <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+                    <a href="#features" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Features</a>
+                    <a href="#pricing" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Subscription</a>
+                    <a href="#" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Changelog</a>
+                    <a href="/dashboard" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Settings</a>
+                </div>
+            </div>
+            <div>
+                <h4 style="color: white; font-weight: 600; margin-bottom: 1.5rem;">Company</h4>
+                <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+                    <a href="#about" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">About Us</a>
+                    <a href="#" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Careers</a>
+                    <a href="#" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Blog</a>
+                    <a href="#" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Contact</a>
+                </div>
+            </div>
+            <div>
+                <h4 style="color: white; font-weight: 600; margin-bottom: 1.5rem;">Legal</h4>
+                <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+                    <a href="#" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Privacy Policy</a>
+                    <a href="#" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Terms of Service</a>
+                    <a href="#" style="color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem; transition: color 0.3s;">Security</a>
+                </div>
+            </div>
+        </div>
+        <div style="max-width: 1200px; margin: 3rem auto 0; padding-top: 2rem; border-top: 1px solid rgba(255,255,255,0.05); text-align: center; color: rgba(255,255,255,0.3); font-size: 0.85rem;">
+            &copy; 2026 Mercury DataCleaner Pro. All rights reserved.
+        </div>
+    </footer>
+
+    <script src="landing.js"></script>
 </body>
 </html>

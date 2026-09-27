@@ -1,5 +1,12 @@
 # Agent Commit Log
 
+| 2026-09-27 | Antigravity AI | Fix Data Preview Table Flexbox Collapse | static/style.css, static/app.js, CHANGELOG.md, COMMIT_LOG.md | Prevented .table-scroll-container from shrinking to 0px under large transformation summaries by assigning min-height: 280px, max-height: 480px, flex-shrink: 0, and triggering renderTablePreview on tab switch. |
+
+| 2026-09-27 | Antigravity AI | Fix multi-provider API routing & dynamic model sync | services/ai_service.py, 
+outes/chat.py, 
+outes/cleaning.py, 
+outes/visualization.py, static/app.js, static/app.html, CHANGELOG.md, COMMIT_LOG.md, KNOWLEDGE_GRAPH.md | Eliminated premature LLM_MODEL fallbacks hijacking provider resolution, added foreign prefix sanitization, mapped Gemini default to gemini-2.0-flash / gemini-1.5-flash-latest, and added dynamic provider-to-model syncing in UI settings modal. |
+
 | 2026-09-27 | GitHub Copilot | Fix chart errors from duplicate headers | `utils/helpers.py`, `services/dataset_service.py`, `routes/visualization.py`, `tests/test_phase1_hygiene.py`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Normalize duplicate dataframe headers to stable unique names on upload and reload, preventing chart code from receiving a DataFrame where it expects a Series; added regression coverage. |
 
 | 2026-09-27 | GitHub Copilot | Make custom charts interactive | `services/visualization_service.py`, `static/app.js`, `static/style.css`, `tests/test_phase1_hygiene.py`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Added structured chart data to existing custom-chart responses and rendered common chart types with live Chart.js tooltips; fixed duplicate-axis column selection and retained image fallback. |

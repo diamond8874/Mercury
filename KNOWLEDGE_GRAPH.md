@@ -98,7 +98,7 @@ The LLM abstraction dynamically routes API calls. It checks settings sent from t
 | `NVIDIA_API_KEY` | NVIDIA | Default API Key used for Nvidia endpoints (e.g. `meta/llama-3.3-70b-instruct`). |
 | `OPENAI_API_KEY` | OpenAI | API Key for authenticating with official OpenAI models (e.g. `gpt-4o`). |
 | `ANTHROPIC_API_KEY` | Anthropic | API Key for authenticating with Anthropic Claude models (e.g. `claude-3-7-sonnet`). |
-| `GEMINI_API_KEY` | Google Gemini | API key for authenticating with Google Gemini models (e.g. `gemini-2.5-flash`). |
+| `GEMINI_API_KEY` | Google Gemini | API key for authenticating with Google Gemini models (e.g. `gemini-3.8-flash`). |
 | `OPENROUTER_API_KEY` | OpenRouter | API key for routing requests through OpenRouter. |
 | `OLLAMA_BASE_URL` | Ollama (Local) | Custom local base URL (defaults to `http://localhost:11434`). |
 | `LLM_PROVIDER` | System Default | Default provider to use if none is selected in the UI (e.g., `nvidia`, `openai`). |

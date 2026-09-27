@@ -24,8 +24,8 @@ def generate_viz_chat(session_id):
     data = request.json or {}
     message = data.get("message", "")
     api_key = data.get("api_key")
-    provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
-    model = data.get("model") or os.environ.get("LLM_MODEL") or "groq/openai/gpt-oss-120b"
+    provider = data.get("provider")
+    model = data.get("model")
     base_url = data.get("base_url")
 
     if not message:

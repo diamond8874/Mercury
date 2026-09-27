@@ -13,3 +13,5 @@ test_output_data/
 *.db-wal
 data/
 .agents/mcp/node_modules/
+fix.py
+WhatsApp Video*

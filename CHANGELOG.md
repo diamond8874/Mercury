@@ -1,5 +1,12 @@
 # Changelog
 
+- **Data Preview Table Flexbox Collapse Fix (static/style.css, static/app.js)**: Fixed an issue where the data preview table collapsed to 0px height due to fixed height: 100% on .tab-pane and unconstrained flex-shrink with large transformation summaries; added min-height: 280px, max-height: 480px, lex-shrink: 0, and explicit tab-activation re-rendering in initTabs.
+
+- **Multi-Provider API Resolution & Dynamic Model Sync (services/ai_service.py, 
+outes/chat.py, 
+outes/cleaning.py, 
+outes/visualization.py, static/app.js, static/app.html)**: Fixed provider auto-selection by removing premature fallback to LLM_MODEL in routes and resolver, preventing Groq from hijacking Gemini and OpenAI requests; added provider prefix sanitation, updated Gemini default model to gemini-2.0-flash (mapping gemini-1.5-flash to gemini-1.5-flash-latest), and introduced dynamic provider-to-model syncing with recommended defaults in the Settings modal.
+
 - **Duplicate Dataset Headers (`utils/helpers.py`, `services/dataset_service.py`, `routes/visualization.py`)**: Duplicate column names receive stable suffixes during dataset loading so chart selection and rendering treat each column as a Series.
 
 - **Interactive Custom Charts (`services/visualization_service.py`, `static/app.js`, `static/style.css`)**: Common line, area, bar, column, pie, donut, and scatter visuals now render as live Chart.js charts with hover values and interactive legends; same-column axes are handled safely, and existing image output remains as a compatibility fallback.
@@ -304,7 +311,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backend: Added support for 'calculate_age' and 'anonymize_text' operations.
 
 ### Fixed
-- Fixed AI prompt parsing issues where \eplace_value_exact\ mapping logic failed on natural language prompts (e.g., "0 to Male, 1 to Female" or "map 0 as Male").
+- Fixed AI prompt parsing issues where \
+eplace_value_exact\ mapping logic failed on natural language prompts (e.g., "0 to Male, 1 to Female" or "map 0 as Male").
 - Updated operation registry aliases to correctly match "impute zero", "drop duplicates", "drop if constant", and text casing operations.
 - Fixed UI layout bug where the Goal Autocomplete dropdown pushed the "Start AI Analysis" button off-screen by positioning the dropdown upwards and making the upload section scrollable.
 - Added comprehensive test script (\generate_tests.py\) covering 44 AI operations to validate the end-to-end data cleaning pipeline.

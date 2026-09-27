@@ -865,6 +865,8 @@ h1, h2, h3, h4, h5, h6 {
     display: none;
     flex-direction: column;
     gap: 1.25rem;
+    position: relative;
+    min-height: 100%;
 }
 
 .tab-pane.active {
@@ -1224,8 +1226,13 @@ h1, h2, h3, h4, h5, h6 {
 .table-scroll-container {
     width: 100%;
     overflow-x: auto;
+    overflow-y: auto;
+    min-height: 280px;
+    max-height: 480px;
+    flex-shrink: 0;
     border: 1px solid var(--border-glass);
     border-radius: 12px;
+    background: rgba(15, 23, 42, 0.4);
 }
 
 .preview-table {

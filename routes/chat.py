@@ -28,8 +28,8 @@ def chat_session(session_id):
     if not message:
         return jsonify({"error": "Missing message in request"}), 400
 
-    provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
-    model = data.get("model") or os.environ.get("LLM_MODEL")
+    provider = data.get("provider")
+    model = data.get("model")
     base_url = data.get("base_url")
 
     if base_url:
@@ -37,9 +37,6 @@ def chat_session(session_id):
         valid, err = validate_base_url(base_url, is_debug=is_debug)
         if not valid:
             return jsonify({"error": f"Invalid base_url: {err}"}), 400
-
-    if not model:
-        return jsonify({"error": "No model specified and LLM_MODEL not set in environment"}), 400
 
     result = handle_chat_turn(
         session_data=session_data,
@@ -66,8 +63,8 @@ def chat_session_stream(session_id):
     if not message:
         return jsonify({"error": "Missing message"}), 400
 
-    provider = data.get("provider") or os.environ.get("LLM_PROVIDER")
-    model = data.get("model") or os.environ.get("LLM_MODEL")
+    provider = data.get("provider")
+    model = data.get("model")
     base_url = data.get("base_url")
 
     if base_url:

@@ -237,12 +237,45 @@ function updateApiStatus() {
     if (els.settingsBaseUrl) els.settingsBaseUrl.value = appState.baseUrl || '';
 }
 
+const providerDefaults = {
+    'gemini': { model: 'gemini-3.8-flash', placeholder: 'e.g. gemini-3.8-flash' },
+    'openai': { model: 'gpt-4o-mini', placeholder: 'e.g. gpt-4o-mini' },
+    'anthropic': { model: 'claude-3-5-haiku-20241022', placeholder: 'e.g. claude-3-5-haiku-20241022' },
+    'nvidia': { model: 'z-ai/glm-5.2', placeholder: 'e.g. z-ai/glm-5.2' },
+    'groq': { model: 'groq/openai/gpt-oss-120b', placeholder: 'e.g. groq/openai/gpt-oss-120b' },
+    'openrouter': { model: 'openrouter/auto', placeholder: 'e.g. openrouter/auto' },
+    'ollama': { model: 'ollama/llama3', placeholder: 'e.g. ollama/llama3' }
+};
+
 function initSettingsModal() {
+    if (els.settingsProvider) {
+        els.settingsProvider.addEventListener('change', () => {
+            const prov = (els.settingsProvider.value || '').toLowerCase();
+            const conf = providerDefaults[prov];
+            if (conf) {
+                const currentVal = (els.settingsModel.value || '').trim();
+                const allDefaults = Object.values(providerDefaults).map(d => d.model);
+                if (!currentVal || allDefaults.includes(currentVal) || currentVal.includes('gpt-oss') || currentVal.includes('glm-5.2')) {
+                    els.settingsModel.value = conf.model;
+                }
+                els.settingsModel.placeholder = conf.placeholder;
+            } else {
+                els.settingsModel.placeholder = 'e.g. gemini-1.5-flash, gpt-4o-mini';
+            }
+        });
+    }
+
     els.openSettingsBtn.addEventListener('click', () => {
         if (els.settingsProvider) els.settingsProvider.value = appState.provider || '';
         if (els.settingsModel) els.settingsModel.value = appState.model || '';
         els.settingsApiKey.value = appState.apiKey || '';
         if (els.settingsBaseUrl) els.settingsBaseUrl.value = appState.baseUrl || '';
+
+        const prov = (appState.provider || '').toLowerCase();
+        if (providerDefaults[prov]) {
+            els.settingsModel.placeholder = providerDefaults[prov].placeholder;
+        }
+
         els.settingsModal.classList.remove('hidden');
     });
     
@@ -268,6 +301,7 @@ function initSettingsModal() {
         localStorage.setItem('llm_base_url', appState.baseUrl);
 
         updateApiStatus();
+        if (window.resetTokenMeter) window.resetTokenMeter();
         els.settingsModal.classList.add('hidden');
     });
     
@@ -327,7 +361,30 @@ function initAuthSystem() {
 
     // Header logout button
     if (els.logoutBtn) {
-        els.logoutBtn.addEventListener('click', handleLogout);
+        els.logoutBtn.addEventListener('click', () => {
+            const logoutModal = document.getElementById('logout-confirm-modal');
+            if (logoutModal) logoutModal.classList.remove('hidden');
+        });
+        
+        const cancelLogoutBtn = document.getElementById('cancel-logout-btn');
+        if (cancelLogoutBtn) {
+            cancelLogoutBtn.addEventListener('click', () => {
+                document.getElementById('logout-confirm-modal').classList.add('hidden');
+            });
+        }
+        
+        const confirmLogoutBtn = document.getElementById('confirm-logout-btn');
+        if (confirmLogoutBtn) {
+            confirmLogoutBtn.addEventListener('click', () => {
+                confirmLogoutBtn.disabled = true;
+                confirmLogoutBtn.textContent = 'Signing out...';
+                handleLogout().then(() => {
+                    confirmLogoutBtn.disabled = false;
+                    confirmLogoutBtn.textContent = 'Yes, Sign out';
+                    document.getElementById('logout-confirm-modal').classList.add('hidden');
+                });
+            });
+        }
     }
 
     // Form submit
@@ -376,10 +433,10 @@ function hideAuthError() {
     }
 }
 
-function showAuthModal(closable = false) {
+function showAuthModal(closable = true) {
     if (!els.authModal) return;
     if (els.closeAuthModalBtn) {
-        els.closeAuthModalBtn.classList.toggle('hidden', !closable);
+        els.closeAuthModalBtn.classList.remove('hidden');
     }
     hideAuthError();
     els.authModal.classList.remove('hidden');
@@ -389,6 +446,9 @@ function showAuthModal(closable = false) {
 function hideAuthModal() {
     if (els.authModal) {
         els.authModal.classList.add('hidden');
+        if (!appState.user) {
+            window.location.href = '/';
+        }
     }
 }
 
@@ -396,6 +456,10 @@ async function checkAuthStatus() {
     try {
         const res = await fetch('/api/auth/me');
         const data = await res.json();
+        
+        // Hide initial loading overlay
+        const loader = document.getElementById('app-loading-overlay');
+        if (loader) loader.classList.add('hidden');
 
         if (res.ok && data.authenticated && data.user) {
             appState.user = data.user;
@@ -768,6 +832,10 @@ function initTabs() {
                     pane.classList.remove('active');
                 }
             });
+
+            if (targetPaneId === 'tab-preview') {
+                renderTablePreview();
+            }
         });
     });
 }
@@ -1914,6 +1982,9 @@ async function sendChatUserMessage() {
                             aiBody.innerHTML = renderChatMarkdown(fullText);
                             aiBubble.classList.remove('streaming');
                             eventType = 'message';
+                            if (parsed.usage && parsed.usage.total_tokens) {
+                                window.updateTokenMeter(parsed.usage.total_tokens);
+                            }
 
                         } else {
                             // Regular token — stream into bubble
@@ -2485,3 +2556,26 @@ document.addEventListener("DOMContentLoaded", () => {
     setupAutocomplete("chat-input", "chat-autocomplete", true);
 });
 
+
+// --- Token Meter Global ---
+let currentSessionTokens = 0;
+window.updateTokenMeter = function(tokens) {
+    currentSessionTokens += tokens;
+    const tokenDisplay = document.getElementById('token-count-display');
+    const keyDisplay = document.getElementById('api-key-name-display');
+    if (tokenDisplay) tokenDisplay.textContent = currentSessionTokens;
+    if (keyDisplay) {
+        if (appState.apiKey && appState.apiKey.length > 4) {
+            keyDisplay.textContent = 'Key: ...' + appState.apiKey.slice(-4);
+        } else {
+            keyDisplay.textContent = 'Default Key';
+        }
+    }
+};
+window.resetTokenMeter = function() {
+    currentSessionTokens = 0;
+    window.updateTokenMeter(0);
+};
+
+// Initialize token meter UI on load
+if (window.resetTokenMeter) window.resetTokenMeter();

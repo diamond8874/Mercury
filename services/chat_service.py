@@ -352,7 +352,8 @@ If no changes are needed, return empty schema_updates {{}}.
 
         session_data["chat_history"].append({"role": "assistant", "content": clean_message})
         save_session(session_data)
-        yield f"event: done\ndata: {json.dumps({'status': 'complete'})}\n\n"
+        estimated_tokens = sum(len(str(m.get('content', ''))) // 4 for m in messages_for_model) + len(full_raw) // 4
+        yield f"event: done\ndata: {json.dumps({'status': 'complete', 'usage': {'total_tokens': estimated_tokens}})}\n\n"
 
     except Exception as e:
         logging.error("Streaming error: %s", str(e))
