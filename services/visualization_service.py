@@ -163,18 +163,28 @@ def render_dataset_chart(
     if df.empty:
         return None, ("Filtered dataset is empty.", 400)
 
-    # DoS Protection & Memory Safety
-    max_plot_points = 1000
-    if chart_category in ['comparison', 'part_to_whole']:
+    # DoS Protection, Memory Safety & Chart Clarity
+    max_plot_points = 50
+    if chart_category in ['comparison', 'part_to_whole', 'trend']:
         if x_col in df.columns and y_col in df.columns:
             try:
                 agg_cols = [y_col]
                 if y_col_2 and y_col_2 in df.columns and y_col_2 != y_col:
                     agg_cols.append(y_col_2)
-                if df[x_col].nunique() > 30 or len(df) > 100:
-                    grouped_df = df.groupby(x_col, as_index=False)[agg_cols].mean().head(30)
-                    if not grouped_df.empty:
-                        df = grouped_df
+                
+                # Aggregate to prevent cluttered and unreadable charts
+                grouped_df = df.groupby(x_col, dropna=False, as_index=False)[agg_cols].sum()
+                
+                if chart_category == 'trend':
+                    # Trend charts must be sorted by X-axis
+                    grouped_df = grouped_df.sort_values(by=x_col).head(max_plot_points)
+                else:
+                    # Comparison and Part-to-Whole sorted by Y-axis descending
+                    grouped_df = grouped_df.sort_values(by=y_col, ascending=False).head(max_plot_points)
+                    
+                if not grouped_df.empty:
+                    df = grouped_df
+                    
             except Exception as agg_ex:
                 logging.warning("Chart pre-aggregation fallback: %s", agg_ex)
     elif len(df) > max_plot_points:

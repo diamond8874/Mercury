@@ -44,52 +44,112 @@ def build_pdf_report(session_data: dict, app_config: dict) -> tuple:
     try:
         df = pd.read_excel(cleaned_path)
 
+        import base64
+        from services.visualization_service import render_dataset_chart
         from powerbi_visuals.trend_charts import PLOT_LOCK
 
         chart_images = []
         target_charts = session_data.get("pinned_charts") if session_data.get("pinned_charts") else session_data.get("charts", [])
         for idx, chart in enumerate(target_charts):
             chart_type = chart.get("chart_type") or chart.get("type", "bar")
+            chart_cat = chart.get("chart_category")
             title = chart.get("title") or f"{chart.get('y_axis', '')} by {chart.get('x_axis', '')}"
             x = chart.get("x_axis") or chart.get("x_col")
             y = chart.get("y_axis") or chart.get("y_col")
+            y2 = chart.get("y_col_2") or chart.get("secondary_y")
+            group_col = chart.get("group_col")
+            filters = chart.get("filters", {})
 
-            if x not in df.columns:
-                continue
+            img_filename = f"{session_id}_chart_{idx}.png"
+            img_path = os.path.join(output_folder, img_filename)
+            saved = False
 
-            with PLOT_LOCK:
+            # 1. Exact visual preservation: if captured image_base64 is present from UI/engine, decode & write directly
+            img_b64 = chart.get("image_base64")
+            if img_b64:
                 try:
-                    plt.figure(figsize=(6, 3.5))
-                    active_font = 'Lora' if 'Lora' in pdfmetrics.getRegisteredFontNames() else 'DejaVu Sans'
-                    plt.title(title, fontname=active_font, fontsize=12, fontweight='bold', pad=10)
+                    if ',' in img_b64:
+                        img_b64 = img_b64.split(',', 1)[1]
+                    img_bytes = base64.b64decode(img_b64)
+                    with open(img_path, 'wb') as f:
+                        f.write(img_bytes)
+                    saved = True
+                except Exception as b64_err:
+                    logging.warning("Failed to decode pinned chart image_base64 for %s: %s", title, b64_err)
 
-                    if chart_type == 'histogram':
-                        df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
-                        plt.ylabel('Frequency')
-                    elif chart_type == 'pie':
-                        df[x].dropna().value_counts().head(6).plot(kind='pie', autopct='%1.1f%%', colors=['#6366f1', '#a855f7', '#10b981', '#f59e0b', '#3b82f6'])
-                        plt.ylabel('')
-                    elif chart_type == 'scatter' and y in df.columns:
-                        df.dropna(subset=[x, y]).plot(kind='scatter', x=x, y=y, color='#a855f7')
-                    elif chart_type == 'line' and y in df.columns:
-                        df.dropna(subset=[x, y]).sort_values(by=x).plot(kind='line', x=x, y=y, color='#6366f1')
-                    elif chart_type == 'bar' and y in df.columns:
-                        df.groupby(x)[y].mean().head(12).plot(kind='bar', color='#10b981')
-                        plt.ylabel(f'Avg {y}')
-                    else:
-                        df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
+            # 2. Re-render via high-fidelity PowerBI visualization engine
+            if not saved and x and x in df.columns:
+                try:
+                    cat_arg = chart_cat
+                    if not cat_arg:
+                        if chart_type in ['pie', 'donut', 'treemap', 'sunburst', 'stacked_column', '100_stacked_column']:
+                            cat_arg = 'part_to_whole'
+                        elif chart_type in ['line', 'area', 'column', 'combo']:
+                            cat_arg = 'trend'
+                        elif chart_type in ['bar', 'clustered_column']:
+                            cat_arg = 'comparison'
+                        elif chart_type in ['waterfall', 'funnel']:
+                            cat_arg = 'change_flow'
+                        elif chart_type in ['histogram', 'box', 'violin']:
+                            cat_arg = 'distribution'
+                        elif chart_type in ['scatter', 'bubble']:
+                            cat_arg = 'relationship'
+                        else:
+                            cat_arg = 'comparison'
 
-                    plt.xticks(rotation=45, ha='right', fontsize=8)
-                    plt.tight_layout()
+                    res, err = render_dataset_chart(
+                        df=df.copy(),
+                        chart_category=cat_arg,
+                        chart_type=chart_type,
+                        x_col=x,
+                        y_col=y,
+                        y_col_2=y2,
+                        group_col=group_col,
+                        filters=filters
+                    )
+                    if res and res.get("data"):
+                        img_bytes = base64.b64decode(res["data"])
+                        with open(img_path, 'wb') as f:
+                            f.write(img_bytes)
+                        saved = True
+                except Exception as render_ex:
+                    logging.warning("PowerBI render_dataset_chart failed for PDF (%s): %s", title, render_ex)
 
-                    img_filename = f"{session_id}_chart_{idx}.png"
-                    img_path = os.path.join(output_folder, img_filename)
-                    plt.savefig(img_path, dpi=200, bbox_inches='tight')
-                    chart_images.append((img_path, chart.get("description", "")))
-                except Exception as plot_ex:
-                    logging.warning("Failed to generate plot for PDF %s: %s", title, str(plot_ex))
-                finally:
-                    plt.close()
+            # 3. Fallback Matplotlib rendering
+            if not saved and x and x in df.columns:
+                with PLOT_LOCK:
+                    try:
+                        plt.figure(figsize=(6, 3.5))
+                        active_font = 'Lora' if 'Lora' in pdfmetrics.getRegisteredFontNames() else 'DejaVu Sans'
+                        plt.title(title, fontname=active_font, fontsize=12, fontweight='bold', pad=10)
+
+                        if chart_type == 'histogram':
+                            df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
+                            plt.ylabel('Frequency')
+                        elif chart_type in ['pie', 'donut']:
+                            df[x].dropna().value_counts().head(6).plot(kind='pie', autopct='%1.1f%%', colors=['#6366f1', '#a855f7', '#10b981', '#f59e0b', '#3b82f6'])
+                            plt.ylabel('')
+                        elif chart_type == 'scatter' and y and y in df.columns:
+                            df.dropna(subset=[x, y]).plot(kind='scatter', x=x, y=y, color='#a855f7')
+                        elif chart_type in ['line', 'area'] and y and y in df.columns:
+                            df.dropna(subset=[x, y]).sort_values(by=x).plot(kind='line', x=x, y=y, color='#6366f1')
+                        elif chart_type in ['bar', 'column'] and y and y in df.columns:
+                            df.groupby(x)[y].mean().head(12).plot(kind='bar', color='#10b981')
+                            plt.ylabel(f'Avg {y}')
+                        else:
+                            df[x].dropna().value_counts().head(10).plot(kind='bar', color='#6366f1')
+
+                        plt.xticks(rotation=45, ha='right', fontsize=8)
+                        plt.tight_layout()
+                        plt.savefig(img_path, dpi=200, bbox_inches='tight')
+                        saved = True
+                    except Exception as plot_ex:
+                        logging.warning("Failed to generate fallback plot for PDF %s: %s", title, str(plot_ex))
+                    finally:
+                        plt.close()
+
+            if saved and os.path.exists(img_path):
+                chart_images.append((img_path, title, chart.get("description", "")))
 
         pdf_filename = f"report_{session_id}.pdf"
         pdf_path = os.path.join(output_folder, pdf_filename)
@@ -282,11 +342,20 @@ def build_pdf_report(session_data: dict, app_config: dict) -> tuple:
         story.append(Spacer(1, 15))
 
         story.append(Paragraph("4. Diagnostic Visualizations", h1_style))
-        for img_path, desc in chart_images:
-            story.append(Paragraph(desc, body_style))
-            story.append(Spacer(1, 4))
-            story.append(Image(img_path, width=380, height=220))
-            story.append(Spacer(1, 12))
+        for item in chart_images:
+            if len(item) == 3:
+                img_path, chart_title, desc = item
+            else:
+                img_path, desc = item
+                chart_title = ""
+            if chart_title:
+                story.append(Paragraph(f"<b>{chart_title}</b>", body_style))
+                story.append(Spacer(1, 2))
+            if desc:
+                story.append(Paragraph(desc, body_style))
+                story.append(Spacer(1, 3))
+            story.append(Image(img_path, width=440, height=250))
+            story.append(Spacer(1, 14))
 
         doc.build(story)
 

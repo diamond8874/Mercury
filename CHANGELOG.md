@@ -1,5 +1,46 @@
 # Changelog
 
+- **MP LCA Submission & Repository Hygiene (`.gitignore`, `static/about.*`, `static/chart.umd.min.js`)**:
+  - Overhauled `.gitignore` with comprehensive exclusions for Python bytecode, virtual environments, SQLite database files, session data, upload artifacts, and test caches.
+  - Bundled local Chart.js offline package and frontend about resources.
+  - Formed release branch `MP-LCA-submission` with prerelease tag.
+
+
+- **Provider Resolution Prioritization & Local Fallback Diagnostics (`services/ai_service.py`, `services/chat_service.py`, `static/app.js`)**:
+  - Prioritized active configured environment provider (`LLM_PROVIDER=groq`) and working `GROQ_API_KEY` over expired NVIDIA keys in `services/ai_service.py` to prevent stale endpoint 404/403 failures.
+  - Implemented auto-healing in `static/app.js` migrating deprecated or quota-exhausted `nemotron`/`nvidia` settings to active `groq` default with zero client disruption.
+  - Enhanced error diagnostics in `services/chat_service.py` to clearly distinguish endpoint deactivation, expired keys, and quota exhaustion (404/403) from transient errors while confirming local parsing execution.
+
+
+- **LLM Streaming Timeout Protection & Missing Rows Intent Fallback (`services/chat_service.py`, `services/ai_service.py`, `services/cleaning/operation_registry.py`, `static/app.js`)**:
+  - Enforced a 12-second timeout on LLM chat completions (`client.chat.completions.create(timeout=12)`) and a 15-second default across all LiteLLM requests, preventing indefinite hangs when provider APIs experience high demand (503 spikes).
+  - Enhanced `run_local_fallback` in `services/chat_service.py` and `services/cleaning/operation_registry.py` to instantly detect and handle missing value / null row deletion requests (e.g., "Delete rows that have missing values") in 0.01 seconds even when the external AI provider is unreachable or delayed.
+  - Added an immediate visual progress indicator (`<i class="fa-solid fa-circle-notch fa-spin"></i> Processing request...`) to the assistant chat bubble in `static/app.js` to ensure immediate interactive feedback while waiting for AI responses.
+  - Auto-healed legacy or unavailable Gemini model tags in client state/localStorage to active stable versions (`gemini-2.5-flash`).
+
+- **PDF Visual Fidelity, Data Modification Synchronization & Dynamic Excel Export Updates (`services/report_service.py`, `services/dataset_service.py`, `routes/sessions.py`, `routes/visualization.py`, `static/app.js`)**:
+  - **Exact Visual Fidelity in PDF:** Pinned charts now capture high-fidelity `image_base64` directly from the Chart.js canvas or PowerBI visual response and store full chart category/type/axes metadata. `services/report_service.py` decodes these images directly into the ReportLab story or executes `render_dataset_chart` through `powerbi_visuals/`, completely eliminating the crude generic Matplotlib bar plot fallback.
+  - **Dynamic Report Recompilation:** Users are no longer locked out once a PDF is compiled. The UI now maintains an active "Recompile PDF Report" button alongside the download link. Modifying cell values, changing cleaning rules, or pinning new charts automatically marks the PDF for recompilation with changes pending.
+  - **Cleaned Excel Export Synchronization:** Fixed cell editing in `services/dataset_service.py` (`update_cell_value`) to read from the active cleaned dataset rather than the uncleaned raw upload, saved cell updates directly into the session's canonical `cleaned_<session_id>.xlsx`, removed the background worker clobber in `routes/sessions.py`, and dynamically updated the Excel download link in `static/app.js` upon editing.
+
+- **Asynchronous PDF Compilation Polling & Download Resolution (`static/app.js`)**:
+  - Resolved an issue where clicking "Compile PDF Report" immediately flashed back without downloading because `POST /api/sessions/<id>/pdf` dispatches an asynchronous background worker returning HTTP 202 (`queued`) with a `job_id`.
+  - Updated `compilePdfDiagnosticsReport()` in `static/app.js` to poll `/api/jobs/<job_id>` with live progress status (`Rendering charts & compiling PDF...`), await completion, and properly bind and display the completed `/api/sessions/<id>/download_pdf` button and chat confirmation once compiled.
+
+- **Fix Treemap Matplotlib 3.9+ `matplotlib.cm.get_cmap` AttributeError (`powerbi_visuals/part_to_whole_charts.py`, `app.py`)**:
+  - Implemented backward-compatibility shims for Matplotlib 3.9+ where `matplotlib.cm.get_cmap()` was deprecated and removed.
+  - Refactored `render_treemap()` in `powerbi_visuals/part_to_whole_charts.py` to supply explicit viridis colormap palettes directly to `squarify.plot()`, eliminating internal calls to `cm.get_cmap()`. Added robust numeric data conversion, missing value filters, and top-30 category capping for clean readability.
+
+- **Offline & Firewall Resilience for Chart.js (`static/chart.umd.min.js`, `static/app.html`, `static/app.js`)**:
+  - Downloaded and bundled the complete official Chart.js UMD distribution locally (`static/chart.umd.min.js`).
+  - Updated `static/app.html` to load local `chart.umd.min.js` first, completely preventing `ReferenceError: Chart is not defined` when external CDN (`cdn.jsdelivr.net`) fails due to firewall, adblocker, certificate, or network issues, while maintaining an asynchronous CDN fallback.
+  - Added defensive `typeof Chart === 'undefined'` guardrails in `renderCharts` and `renderCustomVisual` in `static/app.js`.
+
+- **LLM Error Diagnostics, Stable Model Resolution & Capacity Spike Fallbacks (`services/ai_service.py`, `services/chat_service.py`, `static/app.js`)**:
+  - `services/ai_service.py`: Updated Gemini default to stable `gemini-2.5-flash`; eliminated aggressive overrides that forced user-specified `gemini-1.5-flash` or `gemini-2.0-flash` into `gemini-3.8-flash`; adjusted temperature to 1.0 for Gemini to avoid vertex_ai beta loop errors.
+  - `services/chat_service.py`: Added `_format_ai_error_notice()` translating raw API exceptions into clear user-facing diagnostics (503 Capacity Spike / High Demand, 401 Unauthorized, 403 Forbidden, 410 Gone / End of Life, 429 Rate Limits) instead of generic "AI API unavailable"; added automated fallback retries for Gemini streaming and non-streaming calls; added sorting keyword and column guidance in local fallback parser.
+  - `static/app.js`: Updated provider defaults to active stable models (`gemini-2.5-flash`, `nvidia/llama-3.1-nemotron-70b-instruct`).
+
 - **Data Preview Table Flexbox Collapse Fix (static/style.css, static/app.js)**: Fixed an issue where the data preview table collapsed to 0px height due to fixed height: 100% on .tab-pane and unconstrained flex-shrink with large transformation summaries; added min-height: 280px, max-height: 480px, lex-shrink: 0, and explicit tab-activation re-rendering in initTabs.
 
 - **Multi-Provider API Resolution & Dynamic Model Sync (services/ai_service.py, 

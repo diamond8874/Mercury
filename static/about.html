@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About Mercury DataCleaner</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Styling -->
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="landing.css">
+    <link rel="stylesheet" href="about.css">
+</head>
+<body class="dark-theme landing-body about-body">
+    <!-- NAVBAR -->
+    <nav class="landing-nav">
+        <a href="/" class="landing-logo">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> Mercury
+        </a>
+        <div class="nav-links" style="display: flex; gap: 2rem; align-items: center; margin-left: auto; margin-right: 2rem;">
+            <a href="/" class="nav-link">Home</a>
+            <a href="/about.html" class="nav-link active">About</a>
+            <a href="/#pricing" class="nav-link">Subscription</a>
+            <a href="/dashboard" class="nav-link">Settings</a>
+        </div>
+        <div class="nav-actions">
+            <a href="/dashboard" class="btn-landing btn-primary-glow" style="padding: 0.5rem 1.2rem; font-size: 0.95rem;">Dashboard</a>
+        </div>
+    </nav>
+
+    <div class="about-container">
+        <header class="about-header staggered-fade">
+            <h1>What is Mercury?</h1>
+            <p>Democratizing data science through intent-driven AI.</p>
+        </header>
+
+        <section class="about-section staggered-fade">
+            <h2 class="section-title"><i class="fa-solid fa-bullseye text-primary"></i> Our Mission</h2>
+            <div class="glass-card p-6">
+                <p>Mercury DataCleaner bridges the gap between raw data and actionable insights. By translating plain English into deterministic data operations, we eliminate the need for complex pandas boilerplate and expensive data engineering pipelines. We believe cleaning data should happen at the speed of thought.</p>
+            </div>
+        </section>
+
+        <!-- Accordions -->
+        <section class="about-section staggered-fade">
+            <h2 class="section-title"><i class="fa-solid fa-gears text-primary"></i> Explore Features</h2>
+            <div class="accordion-container">
+                
+                <!-- How it works -->
+                <div class="accordion-item">
+                    <button class="accordion-trigger">
+                        <span><i class="fa-solid fa-microchip"></i> How It Works</span>
+                        <i class="fa-solid fa-chevron-down arrow"></i>
+                    </button>
+                    <div class="accordion-content">
+                        <div class="pipeline-grid">
+                            <div class="pipe-step">
+                                <i class="fa-solid fa-cloud-arrow-up"></i>
+                                <h4>1. Upload</h4>
+                                <p>Provide a CSV or Excel file.</p>
+                            </div>
+                            <div class="pipe-step">
+                                <i class="fa-solid fa-brain"></i>
+                                <h4>2. AI Parsing</h4>
+                                <p>LLM understands your intent.</p>
+                            </div>
+                            <div class="pipe-step">
+                                <i class="fa-solid fa-cogs"></i>
+                                <h4>3. Processing</h4>
+                                <p>Pandas executes safely.</p>
+                            </div>
+                            <div class="pipe-step">
+                                <i class="fa-solid fa-chart-pie"></i>
+                                <h4>4. Visuals</h4>
+                                <p>Generate dynamic charts.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Queries -->
+                <div class="accordion-item">
+                    <button class="accordion-trigger">
+                        <span><i class="fa-solid fa-terminal"></i> Supported AI Queries</span>
+                        <i class="fa-solid fa-chevron-down arrow"></i>
+                    </button>
+                    <div class="accordion-content">
+                        <p class="mb-4">Try these prompts in the chat. Click to copy!</p>
+                        <ul class="query-list">
+                            <li class="query-item">
+                                <code>Fill missing age with median</code>
+                                <button class="btn-icon copy-btn" data-clipboard="Fill missing age with median"><i class="fa-regular fa-copy"></i></button>
+                            </li>
+                            <li class="query-item">
+                                <code>Remove all duplicate rows</code>
+                                <button class="btn-icon copy-btn" data-clipboard="Remove all duplicate rows"><i class="fa-regular fa-copy"></i></button>
+                            </li>
+                            <li class="query-item">
+                                <code>Convert date to datetime format</code>
+                                <button class="btn-icon copy-btn" data-clipboard="Convert date to datetime format"><i class="fa-regular fa-copy"></i></button>
+                            </li>
+                            <li class="query-item">
+                                <code>Extract emails from text column</code>
+                                <button class="btn-icon copy-btn" data-clipboard="Extract emails from text column"><i class="fa-regular fa-copy"></i></button>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Graphs -->
+                <div class="accordion-item">
+                    <button class="accordion-trigger">
+                        <span><i class="fa-solid fa-chart-column"></i> Supported Visualizations</span>
+                        <i class="fa-solid fa-chevron-down arrow"></i>
+                    </button>
+                    <div class="accordion-content">
+                        <div class="graphs-grid">
+                            <span class="graph-tag"><i class="fa-solid fa-chart-line"></i> Trend (Line, Area)</span>
+                            <span class="graph-tag"><i class="fa-solid fa-chart-bar"></i> Comparison (Bar, Column)</span>
+                            <span class="graph-tag"><i class="fa-solid fa-chart-pie"></i> Part-to-Whole (Pie, Donut, Treemap)</span>
+                            <span class="graph-tag"><i class="fa-solid fa-braille"></i> Relationship (Scatter)</span>
+                            <span class="graph-tag"><i class="fa-solid fa-signal"></i> Distribution (Histogram)</span>
+                            <span class="graph-tag"><i class="fa-solid fa-earth-americas"></i> Geo (Bubble Map)</span>
+                            <span class="graph-tag"><i class="fa-solid fa-water"></i> Change Flow (Waterfall)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Limits & Security -->
+                <div class="accordion-item">
+                    <button class="accordion-trigger">
+                        <span><i class="fa-solid fa-shield-halved"></i> Data Privacy & Platform Limits</span>
+                        <i class="fa-solid fa-chevron-down arrow"></i>
+                    </button>
+                    <div class="accordion-content">
+                        <div class="security-info">
+                            <p><strong><i class="fa-solid fa-lock"></i> Privacy:</strong> Your data is sandboxed locally. Only schema metadata (column names and types) are sent to the AI. Full row data remains on your machine. Sessions are automatically cleaned up.</p>
+                            <p><strong><i class="fa-solid fa-server"></i> Limits:</strong></p>
+                            <ul>
+                                <li>Max File Size: 200 MB</li>
+                                <li>Max Rows: 2,000,000</li>
+                                <li>Max Columns: 500</li>
+                                <li>Max Excel Sheets: 10</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Toast Notification for Copy -->
+    <div id="toast" class="toast hidden">Copied to clipboard!</div>
+
+    <script src="about.js"></script>
+</body>
+</html>

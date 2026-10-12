@@ -127,13 +127,16 @@ def toggle_pin_chart(session_id):
         message = "Pinned chart to PDF report!"
 
     session_data["pinned_charts"] = pinned
+    # Invalidate existing PDF report so next compilation includes updated visuals
+    session_data["pdf_filename"] = None
     save_session(session_data)
 
     return jsonify({
         "success": True,
         "is_pinned": is_pinned,
         "pinned_count": len(pinned),
-        "message": message
+        "message": message,
+        "pdf_invalidated": True
     }), 200
 
 

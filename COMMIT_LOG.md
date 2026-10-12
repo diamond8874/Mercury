@@ -1,5 +1,23 @@
 # Agent Commit Log
 
+| 2026-10-12 | Antigravity AI | MP LCA Submission & Repository Hygiene | `.gitignore`, `static/about.*`, `static/chart.umd.min.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Comprehensive .gitignore overhaul, offline chart and about page integration, verification of Flask server, and creation of MP-LCA-submission release branch. |
+
+
+| 2026-09-29 | Antigravity AI | Prioritize Active Groq Provider & Fix LLM 404/403 Diagnostics | `services/ai_service.py`, `services/chat_service.py`, `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Prioritized active environment provider (LLM_PROVIDER=groq) over expired keys in ai_service.py; auto-healed stale nemotron/nvidia in localStorage in app.js to groq/openai/gpt-oss-120b; clarified 404/403 error diagnostics. |
+
+
+| 2026-09-29 | Antigravity AI | LLM Streaming Timeout Protection & Missing Rows Intent Fallback | `services/chat_service.py`, `services/ai_service.py`, `services/cleaning/operation_registry.py`, `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Enforced 12s timeout on streaming chat to prevent API hang during Google 503 spikes; added missing value/null row deletion detection to run_local_fallback; added live thinking indicator in chat bubble. |
+
+| 2026-09-29 | Antigravity AI | PDF Visual Fidelity, Recompilation Flow & Cleaned Excel Export Sync | `services/report_service.py`, `services/dataset_service.py`, `routes/sessions.py`, `routes/visualization.py`, `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Pinned exact base64 canvas/PowerBI images into PDF report; replaced crude fallback with high-fidelity render_dataset_chart engine; enabled persistent report recompilation anytime; fixed update_cell to write to cleaned Excel without worker clobber; synced Excel download link dynamically. |
+
+| 2026-09-29 | Antigravity AI | Fix Asynchronous PDF Compilation Polling & Download Display | `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Handled HTTP 202 background job in frontend compilePdfDiagnosticsReport; polled /api/jobs/<job_id> until completion with live progress indicator; revealed /api/sessions/<id>/download_pdf button upon success. |
+
+| 2026-09-29 | Antigravity AI | Fix Treemap matplotlib.cm.get_cmap AttributeError & upgrade squarify palette | `powerbi_visuals/part_to_whole_charts.py`, `app.py`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Added global and module-level shims for removed matplotlib.cm.get_cmap in Matplotlib 3.9+; refactored render_treemap to pass explicit viridis colormaps directly to squarify.plot, added numeric coercion and category caps. |
+
+| 2026-09-29 | Antigravity AI | Bundle local Chart.js & eliminate "Chart is not defined" error | `static/chart.umd.min.js`, `static/app.html`, `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Bundled local Chart.js library to static/chart.umd.min.js; loaded local bundle with CDN fallback in app.html; added defensive checks in app.js against missing library, completely preventing Chart is not defined failures on CDN blocking or offline environments. |
+
+| 2026-09-29 | Antigravity AI | Fix LLM Provider Diagnostics, Capacity Spike Retries & Gemini Models | `services/ai_service.py`, `services/chat_service.py`, `static/app.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Replaced rigid `gemini-3.8-flash` model overrides with active stable `gemini-2.5-flash`; added automated fallback retry on 503 capacity spikes; added detailed diagnostic error notices instead of generic unavailable message; added sorting guidance and column detection in local fallback parser. |
+
 | 2026-09-27 | Antigravity AI | Fix Data Preview Table Flexbox Collapse | static/style.css, static/app.js, CHANGELOG.md, COMMIT_LOG.md | Prevented .table-scroll-container from shrinking to 0px under large transformation summaries by assigning min-height: 280px, max-height: 480px, flex-shrink: 0, and triggering renderTablePreview on tab switch. |
 
 | 2026-09-27 | Antigravity AI | Fix multi-provider API routing & dynamic model sync | services/ai_service.py, 

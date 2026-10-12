@@ -3,6 +3,11 @@ README: Part-to-Whole Charts
 Covers: Pie chart, Donut chart, Stacked column, 100% Stacked column, Treemap, Sunburst.
 Dependencies: matplotlib, squarify, plotly
 """
+import matplotlib
+import matplotlib.cm as _cm
+if not hasattr(_cm, 'get_cmap'):
+    _cm.get_cmap = lambda name=None, lut=None: matplotlib.colormaps[name or 'viridis']
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -83,16 +88,30 @@ def render_100_stacked_column_chart(df: pd.DataFrame, x_col: str, group_col: str
     return {"type": "image", "data": _fig_to_base64(fig)}
 
 def render_treemap(df: pd.DataFrame, label_col: str, value_col: str):
-    fig, ax = plt.subplots(figsize=(8, 4))
-    data = df.groupby(label_col)[value_col].sum().sort_values(ascending=False)
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    clean_df = df.copy()
+    clean_df[value_col] = pd.to_numeric(clean_df[value_col], errors='coerce')
+    clean_df = clean_df.dropna(subset=[label_col, value_col])
+    data = clean_df.groupby(label_col)[value_col].sum().sort_values(ascending=False)
     data = data[data > 0]
     
     if len(data) > 0:
-        squarify.plot(sizes=data.values, label=data.index, alpha=0.8, ax=ax, text_kwargs={'color':'white'})
-    ax.set_title(f"Treemap: {value_col} by {label_col}", color='white')
+        if len(data) > 30:
+            top = data.iloc[:29]
+            other = pd.Series([data.iloc[29:].sum()], index=['Other'])
+            data = pd.concat([top, other])
+        cmap = matplotlib.colormaps['viridis']
+        colors = [cmap(i / max(len(data) - 1, 1)) for i in range(len(data))]
+        labels = [f"{lbl}\n({val:,.0f})" if val >= 10 else f"{lbl}\n({val:.1f})" for lbl, val in zip(data.index, data.values)]
+        squarify.plot(sizes=data.values, label=labels, color=colors, alpha=0.85, ax=ax, text_kwargs={'color': 'white', 'fontsize': 8, 'weight': 'bold'})
+    else:
+        ax.text(0.5, 0.5, f"No positive numeric values found in '{value_col}'", ha='center', va='center', color='#94a3b8', fontsize=11)
+
+    ax.set_title(f"Treemap: {value_col} by {label_col}", color='white', pad=12, fontsize=12, fontweight='bold')
     ax.axis('off')
     fig.patch.set_alpha(0.0)
     ax.patch.set_alpha(0.0)
+    plt.tight_layout()
     return {"type": "image", "data": _fig_to_base64(fig)}
 
 def render_sunburst_chart(df: pd.DataFrame, path_cols: list, value_col: str):
