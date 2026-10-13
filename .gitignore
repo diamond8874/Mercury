@@ -63,3 +63,9 @@ fix.py
 *.swp
 *.swo
 *~
+
+# Archives and build bundles
+*.zip
+*.tar.gz
+*.tar
+
