@@ -8,10 +8,19 @@ venv/
 ENV/
 env/
 
-# Environment variables & local secrets
-.env
-.env.local
-.env.*.local
+# Environment variables & local secrets (Keep ONLY sample .env.example)
+.env*
+!.env.example
+*.key
+*.pem
+*.cert
+
+# Dataset files - strict exclusion for deployment
+*.csv
+*.tsv
+*.xlsx
+*.xls
+test_dirty_data.xlsx
 
 # Database and SQLite artifacts
 *.db
@@ -19,7 +28,7 @@ env/
 *.db-wal
 users.db*
 
-# Application runtime, session and upload storage
+# Application runtime, session, upload and data storage
 sessions/
 output_data/
 uploads/
@@ -27,7 +36,6 @@ test_output_data/
 data/
 temp/
 tmp/
-fonts/
 
 # Testing & coverage
 .pytest_cache/
@@ -54,8 +62,10 @@ desktop.ini
 *.avi
 WhatsApp Video*
 
-# Temporary scratch scripts
+# Temporary scratch and patch scripts
 fix.py
+patch_*.py
+temp_*.txt
 
 # IDE / Editor configuration
 .idea/
@@ -64,8 +74,9 @@ fix.py
 *.swo
 *~
 
-# Archives and build bundles
+# Archives, deployment folders and build bundles
 *.zip
 *.tar.gz
 *.tar
-
+deployment_*/
+Mercury_*/

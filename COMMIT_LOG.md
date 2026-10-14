@@ -1,5 +1,8 @@
 # Agent Commit Log
 
+| 2026-10-14 | Antigravity AI | Deployment Pre-Release v1.0.0 & Workflow Hygiene | `.gitignore`, `.github/workflows/deploy.yml`, `RELEASE_NOTES.md`, `CHANGELOG.md`, `COMMIT_LOG.md` | Untracked all legacy dataset files; enforced sample .env.example retention only; added GitHub Actions deployment workflow; prepared deployment zip and v1.0.0 pre-release tag. |
+
+
 | 2026-10-12 | Antigravity AI | MP LCA Submission & Repository Hygiene | `.gitignore`, `static/about.*`, `static/chart.umd.min.js`, `CHANGELOG.md`, `COMMIT_LOG.md`, `KNOWLEDGE_GRAPH.md` | Comprehensive .gitignore overhaul, offline chart and about page integration, verification of Flask server, and creation of MP-LCA-submission release branch. |
 
 

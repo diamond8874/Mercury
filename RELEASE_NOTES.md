@@ -1,9 +1,10 @@
 # Release Notes - Mercury (MP LCA Submission)
 
-**Version Tag:** `v1.0.0-pre` / `MP-LCA-submission-pre`  
+**Version Tag:** `v1.0.0` (Pre-release)  
 **Branch:** `MP-LCA-submission`  
 **Target Platform:** Python 3.10+ / Flask / SQLite WAL  
-**Status:** Pre-release / Assessment Ready  
+**Status:** Pre-release for Deployment  
+**Security Notice:** Zero datasets, zero secrets, zero database artifacts included. Sample `.env.example` provided for configuration.
 
 ---
 

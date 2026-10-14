@@ -1,5 +1,12 @@
 # Changelog
 
+- **Deployment Pre-Release v1.0.0, Dataset Sanitization & GitHub Actions Workflow (`.gitignore`, `.github/workflows/deploy.yml`, `RELEASE_NOTES.md`)**:
+  - Strictly untracked and excluded all dataset files (`*.csv`, `*.xlsx`, `*.xls`, `test_dirty_data.xlsx`, `uploads/`, `output_data/`).
+  - Enforced secret isolation keeping exclusively sample `.env.example` while ignoring all live environment files.
+  - Implemented GitHub Actions CI/CD deployment workflow (`.github/workflows/deploy.yml`) for automated linting, testing, clean packaging, and pre-release publishing on tag `v1.0.0`.
+  - Created standalone clean deployment directory structure and release artifact `Mercury_v1.0.0_deployment.zip`.
+
+
 - **MP LCA Submission & Repository Hygiene (`.gitignore`, `static/about.*`, `static/chart.umd.min.js`)**:
   - Overhauled `.gitignore` with comprehensive exclusions for Python bytecode, virtual environments, SQLite database files, session data, upload artifacts, and test caches.
   - Bundled local Chart.js offline package and frontend about resources.
