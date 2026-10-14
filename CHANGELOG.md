@@ -1,5 +1,11 @@
 # Changelog
 
+- **2026-10-14 — Repository Hygiene, Test & Docs Sanitization, and v1.0.0 Release Packaging (`.gitignore`, `.github/workflows/deploy.yml`, `tests/`)**:
+  - Removed obsolete loose test scripts from repository root (`test_chat.py`, `test_human_transforms.py`, `test_llm_json.py`, `test_pin_report.py`, `test_value_mapping.py`, `test_visual.py`, `test_viz_ai.py`, `generate_tests.py`, `generate_test_data.py`) and removed OS artifact `desktop.ini`.
+  - Consolidated and verified official pytest test suite strictly under `tests/`.
+  - Updated `.gitignore` to exclude scratch test scripts, generator scripts, distribution/packaging directories (`dist/`, `build/`, `*.egg-info/`), and report / docx artifacts (`docs/`, `*.docx`).
+  - Strengthened `.github/workflows/deploy.yml` with automated safety checks against untracked datasets, secrets, and junk artifacts before packaging clean deployment zip.
+
 - **Deployment Pre-Release v1.0.0, Dataset Sanitization & GitHub Actions Workflow (`.gitignore`, `.github/workflows/deploy.yml`, `RELEASE_NOTES.md`)**:
   - Strictly untracked and excluded all dataset files (`*.csv`, `*.xlsx`, `*.xls`, `test_dirty_data.xlsx`, `uploads/`, `output_data/`).
   - Enforced secret isolation keeping exclusively sample `.env.example` while ignoring all live environment files.

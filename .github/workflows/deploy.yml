@@ -46,7 +46,7 @@ jobs:
           TESTING: 'true'
           DEBUG: 'true'
         run: |
-          pytest -q -k "not test_all_human_language_transformations and not test_pin_and_report_flow_portable and not test_security_headers_present"
+          pytest tests/ -q -k "not test_pin_and_report_flow_portable and not test_security_headers_present"
 
   build-deployment-package:
     name: Build Clean Deployment Package
@@ -58,13 +58,17 @@ jobs:
 
       - name: Verify No Secrets or Datasets Tracked
         run: |
-          echo "Verifying no datasets or secrets are tracked..."
+          echo "Verifying no datasets, secrets, or junk artifacts are tracked..."
           if git ls-files | grep -E '\.csv$|\.xlsx$|\.xls$|uploads/|output_data/'; then
             echo "ERROR: Tracked dataset files detected in git!"
             exit 1
           fi
           if git ls-files | grep -E '^\.env$|\.key$|\.pem$'; then
             echo "ERROR: Secret files detected in git!"
+            exit 1
+          fi
+          if git ls-files | grep -E '^docs/|desktop\.ini|^test_.*\.py$'; then
+            echo "ERROR: Junk files (docs/tests/desktop.ini) detected in git!"
             exit 1
           fi
           echo "Clean verification passed."

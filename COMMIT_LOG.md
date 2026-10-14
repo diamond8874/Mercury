@@ -1,5 +1,7 @@
 # Agent Commit Log
 
+| 2026-10-14 | Antigravity AI | Repository Hygiene, Loose Test Purge, Ignore Rules & Clean Packaging | `.gitignore`, `.github/workflows/deploy.yml`, `KNOWLEDGE_GRAPH.md`, `CHANGELOG.md`, `COMMIT_LOG.md` | Deleted obsolete root test files (test_chat.py, test_human_transforms.py, test_llm_json.py, test_pin_report.py, test_value_mapping.py, test_visual.py, test_viz_ai.py, generate_tests.py, generate_test_data.py) and desktop.ini; centralized test suite in tests/; added ignore patterns for scratch tests, build directories, and docs/docx artifacts; strengthened deploy.yml workflow with strict validation against untracked datasets, secrets, and junk files. |
+
 | 2026-10-14 | Antigravity AI | Deployment Pre-Release v1.0.0 & Workflow Hygiene | `.gitignore`, `.github/workflows/deploy.yml`, `RELEASE_NOTES.md`, `CHANGELOG.md`, `COMMIT_LOG.md` | Untracked all legacy dataset files; enforced sample .env.example retention only; added GitHub Actions deployment workflow; prepared deployment zip and v1.0.0 pre-release tag. |
 
 

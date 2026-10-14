@@ -67,7 +67,6 @@ Mercury uses a clean, decoupled **Adapter/Factory Pattern** to resolve, configur
 | `powerbi_visuals/geo_charts.py` | Geo Charts Visualizer | Generates interactive bubble and choropleth maps with NaN radius safeguards. | `folium`, `pandas` |
 | `utils/fonts.py` | PDF Font Utility | Core downloader and registrar for PDF report fonts. | `os`, `urllib`, `reportlab` |
 | `utils/job_tracker.py` | Job Tracking Utility | Bounded `ThreadPoolExecutor` worker pool (max 2 workers) with SQLite DB persistence, auto-completion, exception capture, and legacy API bridges. | `threading`, `concurrent.futures`, `repositories.job_repository` |
-| `generate_test_data.py` | Script | Generates a synthetic dataset for testing data cleaning capabilities. | `pandas`, `numpy`, `random` |
 | `tests/conftest.py` | Test Fixture | Shared pytest fixtures providing isolated temporary directories for test sessions and upload files. | `pytest`, `app`, `config` |
 | `tests/test_cleaning_engine.py` | Test Suite | Comprehensive unit tests for intent parsing, validation, execution safety, datatype conversions, and realistic NL prompts (26 test cases). | `pytest`, `pandas`, `numpy`, `services.cleaning` |
 | `tests/test_phase1_hygiene.py` | Test Suite | Unit & integration tests for environment variables, UUID session validation, route rejection, and portable PDF report pinning flow. | `pytest`, `pandas`, `uuid` |

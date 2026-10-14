@@ -80,3 +80,22 @@ temp_*.txt
 *.tar
 deployment_*/
 Mercury_*/
+dist/
+build/
+*.egg-info/
+
+# Scratch root test scripts and synthetic test generators
+/generate_tests.py
+/generate_test_data.py
+/test_chat.py
+/test_human_transforms.py
+/test_llm_json.py
+/test_pin_report.py
+/test_value_mapping.py
+/test_visual.py
+/test_viz_ai.py
+
+# Documentation drafts, academic report manuscripts & Word QA artifacts
+docs/
+*.docx
+
