@@ -1,5 +1,7 @@
 # Agent Commit Log
 
+| 2026-10-15 | Codex | Preserve upstream cleanup history | `.github/workflows/deploy.yml`, `COMMIT_LOG.md` | Merged the upstream cleanup branch's separate CI-trigger commits; retained validation for cleanup branch pushes and pull requests alongside main, and retained tag-derived stable release packaging. |
+
 | 2026-10-15 | Codex | Fix rounding validation boundary and prepare v1.0.1 | `services/cleaning/schema.py`, `tests/test_typed_rounding_validation.py`, `.github/workflows/deploy.yml`, `RELEASE_NOTES.md`, `KNOWLEDGE_GRAPH.md`, `CHANGELOG.md`, `COMMIT_LOG.md` | Reproduced uncaught precision conversion, moved conversion into existing exception handling, verified parser/engine regressions, preserved upstream history by fast-forwarding cleanup branch, and made release packaging tag-derived with stable publication. Local academic artifacts remain ignored. |
 
 | 2026-10-14 | Antigravity AI | Repository Hygiene, Loose Test Purge, Ignore Rules & Clean Packaging | `.gitignore`, `.github/workflows/deploy.yml`, `KNOWLEDGE_GRAPH.md`, `CHANGELOG.md`, `COMMIT_LOG.md` | Deleted obsolete root test files (test_chat.py, test_human_transforms.py, test_llm_json.py, test_pin_report.py, test_value_mapping.py, test_visual.py, test_viz_ai.py, generate_tests.py, generate_test_data.py) and desktop.ini; centralized test suite in tests/; added ignore patterns for scratch tests, build directories, and docs/docx artifacts; strengthened deploy.yml workflow with strict validation against untracked datasets, secrets, and junk files. |

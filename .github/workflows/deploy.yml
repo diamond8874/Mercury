@@ -12,6 +12,7 @@ on:
     branches:
       - main
       - MP-LCA-submission
+      - cleanup-and-release-v1.0.0
 
 permissions:
   contents: write
