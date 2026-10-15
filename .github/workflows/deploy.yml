@@ -4,13 +4,11 @@ on:
   push:
     branches:
       - cleanup-and-release-v1.0.0
-      - main
     tags:
       - 'v*'
   pull_request:
     branches:
       - cleanup-and-release-v1.0.0
-      - main
 
 permissions:
   contents: write
