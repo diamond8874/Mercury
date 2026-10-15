@@ -35,10 +35,43 @@ def _explicit_value_mapping_updates(message: str, current_session: dict) -> Dict
     return updates
 
 
+def _format_ai_error_notice(e: Exception) -> str:
+    err_str = str(e).lower()
+    if "503" in err_str or "high demand" in err_str or "service unavailable" in err_str:
+        return "⚠️ AI service temporarily unavailable (503: Capacity Spike / High Demand). The model is experiencing heavy traffic at Google/Provider. Try 'gemini-2.5-flash' or try again in a moment."
+    elif "401" in err_str or "unauthorized" in err_str or "authentication" in err_str:
+        return "⚠️ API Key Authentication Failed (401: Unauthorized). Please verify your API key in Settings."
+    elif "403" in err_str or "forbidden" in err_str:
+        return "⚠️ API Access Forbidden (403: Forbidden / Quota Exhausted). Please check your API key and quota in Settings."
+    elif "410" in err_str or "gone" in err_str or "end of life" in err_str:
+        return "⚠️ Selected AI Model has reached End-Of-Life (410: Gone). Please choose a newer model in Settings."
+    elif "404" in err_str or "not found" in err_str:
+        return "⚠️ AI Model Not Found (404) or Endpoint Inactive. Please verify your provider/model in Settings."
+    elif "429" in err_str or "rate limit" in err_str or "quota" in err_str:
+        return "⚠️ AI Rate Limit / Quota Exceeded (429). Please wait a moment or check your provider quota."
+    elif "timeout" in err_str:
+        return "⚠️ AI Request Timed Out. The provider took too long to respond."
+    else:
+        return "⚠️ AI API unavailable."
+
+
 def run_local_fallback(msg_lower: str, current_session: dict) -> Dict[str, Any]:
     """Extract column intents locally when offline or LLM unavailable."""
     schema_updates = {}
     columns = [col["name"] for col in current_session.get("columns", [])]
+    # 1. Detect dataset-wide null/missing row drops (e.g. "delete rows that have missing values")
+    if any(kw in msg_lower for kw in ["missing", "null", "nan"]) and any(kw in msg_lower for kw in ["row", "rows"]):
+        if any(kw in msg_lower for kw in ["delete", "drop", "remove", "eliminate", "clean"]):
+            cols_with_nulls = [col["name"] for col in current_session.get("columns", []) if col.get("null_count", 0) > 0]
+            target_cols = cols_with_nulls if cols_with_nulls else [c["name"] for c in current_session.get("columns", [])]
+            for col in target_cols:
+                schema_updates[col] = {
+                    "action": "transform",
+                    "reason": "Remove rows with missing values.",
+                    "transformation": "delete rows that have missing values"
+                }
+            return schema_updates
+
     clean_msg = re.sub(
         r'\b(remove|drop|delete)\s+(duplicates?|nulls?|nans?|missing|rows?|placeholders?|outliers?|invalid|bad)\b',
         '',
@@ -58,7 +91,7 @@ def run_local_fallback(msg_lower: str, current_session: dict) -> Dict[str, Any]:
                 schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in chat.", "transformation": None}
             elif any(kw in msg_lower for kw in ["keep", "add", "retain", "include"]):
                 schema_updates[col] = {"action": "keep", "reason": "Kept by user request in chat.", "transformation": None}
-            elif re.search(r'\b(?:transform|convert|encode|impute|round|whole\s+number|integer|change|replace|map|set)\b', msg_lower):
+            elif re.search(r'\b(?:transform|convert|encode|impute|round|whole\s+number|integer|change|replace|map|set|sort)\b', msg_lower):
                 schema_updates[col] = {"action": "transform", "reason": "Transform requested in chat.", "transformation": msg_lower}
     return schema_updates
 
@@ -151,15 +184,40 @@ If no changes are needed, return empty schema_updates {{}}.
         messages_for_model.append({"role": "user", "content": f"{system_prompt}\n\nUser message: {message}"})
 
         logging.info("Sending chat query to model %s...", model)
-        completion = client.chat.completions.create(
-            model=model,
-            messages=messages_for_model,
-            temperature=0.2,
-            top_p=1,
-            max_tokens=1024,
-            seed=42
-        )
-        response_text = completion.choices[0].message.content
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages_for_model,
+                temperature=0.2,
+                top_p=1,
+                max_tokens=1024,
+                seed=42
+            )
+            response_text = completion.choices[0].message.content
+        except Exception as primary_err:
+            prov = (provider or "").lower()
+            is_gemini = "gemini" in prov or (model and "gemini" in model.lower())
+            response_text = None
+            if is_gemini:
+                for alt_m in ["gemini-2.5-flash", "gemini-1.5-flash"]:
+                    if alt_m in (model or "").lower():
+                        continue
+                    try:
+                        logging.info("Retrying chat turn with Gemini fallback %s...", alt_m)
+                        completion = client.chat.completions.create(
+                            model=alt_m,
+                            messages=messages_for_model,
+                            temperature=1.0,
+                            top_p=1,
+                            max_tokens=1024
+                        )
+                        response_text = completion.choices[0].message.content
+                        if response_text:
+                            break
+                    except Exception as alt_err:
+                        logging.warning("Fallback %s failed: %s", alt_m, str(alt_err))
+            if not response_text:
+                raise primary_err
 
         try:
             ai_data = parse_json_response(response_text)
@@ -192,13 +250,17 @@ If no changes are needed, return empty schema_updates {{}}.
         logging.error("Chat API failed: %s", str(e))
         msg_lower = message.lower()
         schema_updates = run_local_fallback(msg_lower, session_data)
-        response_msg = "⚠️ AI API unavailable. Applied local parsing."
+        err_notice = _format_ai_error_notice(e)
         if schema_updates:
-            response_msg += f" Updated: **{', '.join(schema_updates.keys())}**."
+            response_msg = f"{err_notice} Applied local parsing. Updated: **{', '.join(schema_updates.keys())}**."
             for col, act in schema_updates.items():
                 session_data["column_actions"][col] = act
         else:
-            response_msg += " No column changes detected. Try mentioning a column name with 'drop', 'keep', or 'transform'."
+            response_msg = f"{err_notice} Applied local parsing. No column changes detected."
+            if "sort" in msg_lower:
+                response_msg += " (Tip: To sort data, please specify a column name, e.g., 'Sort by [Column] in ascending order'.)"
+            else:
+                response_msg += " Try mentioning a column name with 'drop', 'keep', or 'transform'."
 
         session_data["chat_history"].append({"role": "assistant", "content": response_msg})
         save_session(session_data)
@@ -299,22 +361,57 @@ If no changes are needed, return empty schema_updates {{}}.
         messages_for_model.append({"role": "user", "content": f"{system_prompt}\n\nUser message: {message}"})
 
         logging.info("Streaming chat completion from model %s...", model)
-        stream_response = client.chat.completions.create(
-            model=model,
-            messages=messages_for_model,
-            temperature=0.2,
-            top_p=1,
-            max_tokens=1024,
-            seed=42,
-            stream=True
-        )
-
         full_raw = ""
-        for chunk in stream_response:
-            delta = getattr(chunk.choices[0], 'delta', None)
-            text_part = delta.content if delta and hasattr(delta, 'content') else ""
-            if text_part:
-                full_raw += text_part
+        try:
+            stream_response = client.chat.completions.create(
+                model=model,
+                messages=messages_for_model,
+                temperature=0.2,
+                top_p=1,
+                max_tokens=1024,
+                seed=42,
+                timeout=12,
+                stream=True
+            )
+            for chunk in stream_response:
+                delta = getattr(chunk.choices[0], 'delta', None)
+                text_part = delta.content if delta and hasattr(delta, 'content') else ""
+                if text_part:
+                    full_raw += text_part
+        except Exception as primary_err:
+            prov = (provider or "").lower()
+            is_gemini = "gemini" in prov or (model and "gemini" in model.lower())
+            if is_gemini and not full_raw:
+                alt_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
+                retried = False
+                for alt_m in alt_models:
+                    if alt_m in (model or "").lower():
+                        continue
+                    try:
+                        logging.info("Retrying chat stream with Gemini fallback %s...", alt_m)
+                        stream_response = client.chat.completions.create(
+                            model=alt_m,
+                            messages=messages_for_model,
+                            temperature=1.0,
+                            top_p=1,
+                            max_tokens=1024,
+                            timeout=8,
+                            stream=True
+                        )
+                        for chunk in stream_response:
+                            delta = getattr(chunk.choices[0], 'delta', None)
+                            text_part = delta.content if delta and hasattr(delta, 'content') else ""
+                            if text_part:
+                                full_raw += text_part
+                        if full_raw:
+                            retried = True
+                            break
+                    except Exception as alt_err:
+                        logging.warning("Fallback model %s failed: %s", alt_m, str(alt_err))
+                if not retried:
+                    raise primary_err
+            else:
+                raise primary_err
 
         try:
             import json_repair
@@ -359,13 +456,17 @@ If no changes are needed, return empty schema_updates {{}}.
         logging.error("Streaming error: %s", str(e))
         msg_lower = message.lower()
         schema_updates = run_local_fallback(msg_lower, session_data)
-        response_msg = "⚠️ AI API unavailable. Applied local parsing."
+        err_notice = _format_ai_error_notice(e)
         if schema_updates:
-            response_msg += f" Updated: **{', '.join(schema_updates.keys())}**."
+            response_msg = f"{err_notice} Applied local parsing. Updated: **{', '.join(schema_updates.keys())}**."
             for col, act in schema_updates.items():
                 session_data["column_actions"][col] = act
         else:
-            response_msg += " No column changes detected. Try mentioning a column name with 'drop', 'keep', or 'transform'."
+            response_msg = f"{err_notice} Applied local parsing. No column changes detected."
+            if "sort" in msg_lower:
+                response_msg += " (Tip: To sort data, please specify a column name, e.g., 'Sort by [Column] in ascending order'.)"
+            else:
+                response_msg += " Try mentioning a column name with 'drop', 'keep', or 'transform'."
 
         trigger = len(schema_updates) > 0
         yield f"event: schema_updates\ndata: {json.dumps({'schema_updates': schema_updates, 'column_actions': session_data['column_actions'], 'trigger_reprocess': trigger})}\n\n"

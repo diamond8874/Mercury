@@ -247,16 +247,25 @@ def process_cleaning_for_session(session_data, actions, sheet_name="Default"):
 def update_cell_value(session_data, row_idx, col_name, new_val):
     """
     Updates a single cell in the session file.
-    Returns (result_dict, None) or (None, (error_msg, status_code)).
+    Reads from the active cleaned file if available, otherwise from the original upload.
+    Saves to the canonical cleaned dataset, updates preview, invalidates stale PDF reports,
+    and returns (result_dict, None) or (None, (error_msg, status_code)).
     """
+    session_id = session_data.get("session_id")
     file_id = session_data.get("file_id")
-    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], file_id)
-    if not os.path.exists(file_path):
+    cleaned_filename = session_data.get("cleaned_filename")
+
+    # Priority: read from existing cleaned file if present, else original upload
+    if cleaned_filename and os.path.exists(os.path.join(current_app.config['OUTPUT_FOLDER'], cleaned_filename)):
+        file_path = os.path.join(current_app.config['OUTPUT_FOLDER'], cleaned_filename)
+    elif file_id and os.path.exists(os.path.join(current_app.config['UPLOAD_FOLDER'], file_id)):
+        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], file_id)
+    else:
         return None, ("File not found", 404)
 
     try:
         sheet_name = session_data.get("sheet_name", 0)
-        file_ext = file_id.rsplit('.', 1)[1].lower()
+        file_ext = file_path.rsplit('.', 1)[1].lower()
         if file_ext in ['xlsx', 'xls']:
             df = pd.read_excel(file_path, sheet_name=sheet_name if sheet_name not in ("Default", None) else 0)
         else:
@@ -284,16 +293,33 @@ def update_cell_value(session_data, row_idx, col_name, new_val):
 
         df.at[row_i, col_name] = casted_val
 
-        working_filename = f"edited_{file_id.split('.')[0]}.xlsx"
-        working_path = os.path.join(current_app.config['OUTPUT_FOLDER'], working_filename)
-        safe_to_excel(df, working_path, index=False)
-        session_data["cleaned_filename"] = working_filename
+        # Always save to the canonical cleaned output file for this session
+        target_filename = f"cleaned_{session_id}.xlsx" if session_id else f"cleaned_{file_id.split('.')[0]}.xlsx"
+        target_path = os.path.join(current_app.config['OUTPUT_FOLDER'], target_filename)
+        safe_to_excel(df, target_path, index=False)
+
+        session_data["cleaned_filename"] = target_filename
         session_data["preview"] = get_safe_preview(df, 15)
+
+        # Invalidate old compiled PDF report since data has changed
+        old_pdf = session_data.get("pdf_filename")
+        if old_pdf:
+            old_pdf_path = os.path.join(current_app.config['OUTPUT_FOLDER'], old_pdf)
+            if os.path.exists(old_pdf_path):
+                try:
+                    os.remove(old_pdf_path)
+                except Exception:
+                    pass
+        session_data["pdf_filename"] = None
         save_session(session_data)
 
         return {
             "success": True,
-            "message": f"Updated cell at row {row_i}, column '{col_name}' to '{casted_val}'"
+            "message": f"Updated cell at row {row_i}, column '{col_name}' to '{casted_val}'",
+            "download_url": f"/api/download/{target_filename}",
+            "cleaned_filename": target_filename,
+            "preview": session_data["preview"],
+            "pdf_invalidated": True
         }, None
 
     except Exception as e:

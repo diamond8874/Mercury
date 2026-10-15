@@ -1,17 +1,101 @@
-.venv
-__pycache__
-venv
-sessions
-output_data
-uploads
-fonts
-.env
-test_output_data/
+# Python bytecode and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
 *.pyc
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables & local secrets (Keep ONLY sample .env.example)
+.env*
+!.env.example
+*.key
+*.pem
+*.cert
+
+# Dataset files - strict exclusion for deployment
+*.csv
+*.tsv
+*.xlsx
+*.xls
+test_dirty_data.xlsx
+
+# Database and SQLite artifacts
 *.db
 *.db-shm
 *.db-wal
+users.db*
+
+# Application runtime, session, upload and data storage
+sessions/
+output_data/
+uploads/
+test_output_data/
 data/
+temp/
+tmp/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Logs
+*.log
+
+# Node & dependencies
+node_modules/
 .agents/mcp/node_modules/
-fix.py
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Media files
+*.mp4
+*.mov
+*.avi
 WhatsApp Video*
+
+# Temporary scratch and patch scripts
+fix.py
+patch_*.py
+temp_*.txt
+
+# IDE / Editor configuration
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Archives, deployment folders and build bundles
+*.zip
+*.tar.gz
+*.tar
+deployment_*/
+Mercury_*/
+dist/
+build/
+*.egg-info/
+
+# Scratch root test scripts and synthetic test generators
+/generate_tests.py
+/generate_test_data.py
+/test_chat.py
+/test_human_transforms.py
+/test_llm_json.py
+/test_pin_report.py
+/test_value_mapping.py
+/test_visual.py
+/test_viz_ai.py
+
+# Documentation drafts, academic report manuscripts & Word QA artifacts
+docs/
+*.docx
+

@@ -4,6 +4,7 @@ Covers: Bubble map, Choropleth, Shape map.
 Dependencies: folium, geopandas
 Note: ArcGIS map in Power BI is proprietary, we use Folium as standard open source alternative.
 """
+import base64
 from html import escape as html_escape
 import pandas as pd
 import folium
@@ -81,7 +82,8 @@ def render_bubble_map(df: pd.DataFrame, lat_col: str, lon_col: str, size_col: st
             ).add_to(m)
             
         full_html = m.get_root().render()
-        iframe_wrapper = f'<iframe srcdoc="{html_escape(full_html)}" style="width: 100%; height: 420px; border: none; border-radius: 8px;" sandbox="allow-scripts allow-same-origin"></iframe>'
+        b64_html = base64.b64encode(full_html.encode('utf-8')).decode('utf-8')
+        iframe_wrapper = f'<iframe src="data:text/html;base64,{b64_html}" style="width: 100%; height: 420px; border: none; border-radius: 8px;" sandbox="allow-scripts allow-same-origin"></iframe>'
         return {"type": "html", "data": iframe_wrapper}
 
     # If the user selected non-coordinate columns (e.g. Categorical column like Department/Country/State),
@@ -104,7 +106,8 @@ def render_bubble_map(df: pd.DataFrame, lat_col: str, lon_col: str, size_col: st
     '''
     m.get_root().html.add_child(folium.Element(notice_html))
     full_html = m.get_root().render()
-    iframe_wrapper = f'<iframe srcdoc="{html_escape(full_html)}" style="width: 100%; height: 420px; border: none; border-radius: 8px;" sandbox="allow-scripts allow-same-origin"></iframe>'
+    b64_html = base64.b64encode(full_html.encode('utf-8')).decode('utf-8')
+    iframe_wrapper = f'<iframe src="data:text/html;base64,{b64_html}" style="width: 100%; height: 420px; border: none; border-radius: 8px;" sandbox="allow-scripts allow-same-origin"></iframe>'
     return {"type": "html", "data": iframe_wrapper}
 
 def render_choropleth_map(df: pd.DataFrame, region_col: str, value_col: str):

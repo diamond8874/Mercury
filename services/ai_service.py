@@ -62,9 +62,12 @@ class UnifiedLLMClient:
                 if seed is not None and (provider in ["openai", "nvidia"]):
                     litellm_args["seed"] = seed
 
-                # Allow passing custom arguments directly
-                for k, v in kwargs.items():
-                    litellm_args[k] = v
+                # Optimize temperature for Gemini to avoid vertex_ai loops/warnings
+                if (provider == "gemini" or "gemini" in model_name.lower()) and temperature is not None and temperature < 0.7:
+                    litellm_args["temperature"] = 1.0
+
+                # Set a safe default request timeout so remote LLM calls never hang indefinitely
+                litellm_args.setdefault("timeout", 15)
 
                 return litellm.completion(**litellm_args)
 
@@ -103,11 +106,11 @@ class UnifiedLLMClient:
             
             # Pass 1: explicit provider selection wins
             if prov == "nvidia" or (self.api_key or "").startswith("nvapi-"):
-                model_name = "z-ai/glm-5.2"
+                model_name = "nvidia/llama-3.1-nemotron-70b-instruct"
             elif prov == "groq":
                 model_name = "groq/openai/gpt-oss-120b"
             elif prov in ["gemini", "google"]:
-                model_name = "gemini/gemini-3.8-flash"
+                model_name = "gemini/gemini-2.5-flash"
             elif prov == "openai":
                 model_name = "gpt-4o-mini"
             elif prov == "anthropic":
@@ -118,18 +121,32 @@ class UnifiedLLMClient:
                 model_name = "ollama/llama3"
                 
             # Pass 2: only fall back to env vars if nothing was explicitly selected
-            elif os.environ.get("NVIDIA_API_KEY"):
-                model_name = "z-ai/glm-5.2"
+            elif os.environ.get("LLM_PROVIDER"):
+                env_p = (os.environ.get("LLM_PROVIDER") or "").lower()
+                if env_p == "groq" and os.environ.get("GROQ_API_KEY"):
+                    model_name = os.environ.get("LLM_MODEL") or "groq/openai/gpt-oss-120b"
+                elif env_p in ["gemini", "google"] and (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+                    model_name = os.environ.get("LLM_MODEL") or "gemini/gemini-2.5-flash"
+                elif env_p == "openai" and os.environ.get("OPENAI_API_KEY"):
+                    model_name = os.environ.get("LLM_MODEL") or "gpt-4o-mini"
+                elif env_p == "anthropic" and os.environ.get("ANTHROPIC_API_KEY"):
+                    model_name = os.environ.get("LLM_MODEL") or "claude-3-5-haiku-20241022"
+                elif env_p == "nvidia" and os.environ.get("NVIDIA_API_KEY"):
+                    model_name = os.environ.get("LLM_MODEL") or "nvidia/llama-3.1-nemotron-70b-instruct"
+                else:
+                    model_name = os.environ.get("LLM_MODEL") or "groq/openai/gpt-oss-120b"
+            elif os.environ.get("GROQ_API_KEY"):
+                model_name = "groq/openai/gpt-oss-120b"
             elif os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-                model_name = "gemini/gemini-3.8-flash"
+                model_name = "gemini/gemini-2.5-flash"
             elif os.environ.get("OPENAI_API_KEY"):
                 model_name = "gpt-4o-mini"
             elif os.environ.get("ANTHROPIC_API_KEY"):
                 model_name = "claude-3-5-haiku-20241022"
-            elif os.environ.get("GROQ_API_KEY"):
-                model_name = "groq/openai/gpt-oss-120b"
+            elif os.environ.get("NVIDIA_API_KEY"):
+                model_name = "nvidia/llama-3.1-nemotron-70b-instruct"
             else:
-                model_name = os.environ.get("LLM_MODEL") or "z-ai/glm-5.2"
+                model_name = os.environ.get("LLM_MODEL") or "groq/openai/gpt-oss-120b"
 
         # Replace deprecated/end-of-life models for Groq only if user is using Groq
         if (self.provider or "").lower() == "groq" or model_name.startswith("groq/"):
@@ -170,13 +187,13 @@ class UnifiedLLMClient:
             foreign_prefix = model_name.split("/")[0].lower()
             if foreign_prefix in ["openai", "anthropic", "gemini", "google", "groq", "openrouter", "ollama", "nvidia"] and foreign_prefix != explicit_provider:
                 if explicit_provider == "gemini":
-                    model_name = "gemini/gemini-3.8-flash"
+                    model_name = "gemini/gemini-2.5-flash"
                 elif explicit_provider == "openai":
                     model_name = "gpt-4o-mini"
                 elif explicit_provider == "anthropic":
                     model_name = "claude-3-5-haiku-20241022"
                 elif explicit_provider == "nvidia":
-                    model_name = "z-ai/glm-5.2"
+                    model_name = "nvidia/llama-3.1-nemotron-70b-instruct"
                 elif explicit_provider == "groq":
                     model_name = "groq/openai/gpt-oss-120b"
                 else:
@@ -192,8 +209,12 @@ class UnifiedLLMClient:
                 provider = "openai"
             elif "nvidia" in model_lower or "nemotron" in model_lower or "glm" in model_lower or "llama" in model_lower:
                 provider = "nvidia"
+            elif os.environ.get("LLM_PROVIDER"):
+                provider = os.environ.get("LLM_PROVIDER")
+            elif os.environ.get("GROQ_API_KEY"):
+                provider = "groq"
             else:
-                provider = "nvidia"
+                provider = "groq"
 
         provider = provider.lower()
         if provider in ["google", "google-gemini"]:
@@ -236,10 +257,11 @@ class UnifiedLLMClient:
             if not api_key:
                 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             clean_model = model_name.split("/", 1)[1] if "/" in model_name else model_name
-            if "gpt-oss" in clean_model or "glm" in clean_model or not clean_model:
-                clean_model = "gemini-3.8-flash"
-            elif clean_model in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]:
-                clean_model = "gemini-3.8-flash"
+            # Map experimental, invalid or legacy model tags to current stable Google AI Studio models
+            if "gpt-oss" in clean_model or "glm" in clean_model or "gemini-3" in clean_model or not clean_model:
+                clean_model = "gemini-2.5-flash"
+            elif clean_model == "gemini-1.5-flash":
+                clean_model = "gemini-1.5-flash-latest"
             model_name = f"gemini/{clean_model}"
 
         elif provider == "openrouter":

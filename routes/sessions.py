@@ -145,14 +145,6 @@ def update_individual_cell(session_id):
         err_msg, status_code = err
         return jsonify({"error": err_msg}), status_code
 
-    uid = current_user.id if current_user.is_authenticated else None
-    submit_background_job(
-        session_id, "process", run_background_process,
-        current_app._get_current_object(), session_id, None,
-        user_id=uid,
-        timeout_seconds=300,
-    )
-
     return jsonify(result), 200
 
 

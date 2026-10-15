@@ -126,9 +126,13 @@ OPERATIONS = {
         "description": "Fill missing values with a custom value."
     },
     "drop_null_rows": {
-        "aliases": ["drop null rows", "remove null rows", "drop rows with null",
-                    "remove rows with null", "drop rows with missing", "remove missing rows",
-                    "drop na", "remove na", "drop rows containing null"],
+        "aliases": ["drop null rows", "remove null rows", "delete null rows", "drop rows with null",
+                    "remove rows with null", "delete rows with null", "drop rows with missing",
+                    "remove rows with missing", "delete rows with missing", "delete rows that have missing values",
+                    "delete rows that have missing", "drop rows that have missing values", "drop rows that have missing",
+                    "remove rows that have missing values", "remove rows that have missing",
+                    "remove missing rows", "drop missing rows", "delete missing rows",
+                    "drop na", "remove na", "delete na", "drop rows containing null", "delete rows containing null"],
         "scope": "dataset",
         "changes_rows": True, "changes_columns": False, "changes_values": False,
         "dtype_constraint": "any", "required_params": [],

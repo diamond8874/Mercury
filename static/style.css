@@ -1983,7 +1983,12 @@ h1, h2, h3, h4, h5, h6 {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.45rem;
+    max-height: 380px;
+    overflow-y: auto;
+    padding-right: 4px;
 }
+.bi-visual-grid::-webkit-scrollbar { width: 4px; }
+.bi-visual-grid::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 
 .bi-viz-btn {
     min-width: 0;
@@ -2756,4 +2761,7 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 0.65rem;
     border: 1px solid rgba(16, 185, 129, 0.3);
 }
+
+
+.custom-chart-content iframe { width: 100% !important; height: 100% !important; min-height: 420px; display: block; border-radius: 8px; }
 

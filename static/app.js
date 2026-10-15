@@ -5,8 +5,26 @@ const appState = {
     authMode: 'login',
     previewMode: 'after', // 'after' (cleaned) or 'before' (original)
     apiKey: sessionStorage.getItem('llm_api_key') || '',
-    provider: localStorage.getItem('llm_provider') || '',
-    model: localStorage.getItem('llm_model') || '',
+    provider: (() => {
+        let p = localStorage.getItem('llm_provider') || '';
+        let m = localStorage.getItem('llm_model') || '';
+        if (p === 'nvidia' && (m.includes('nemotron') || !m)) {
+            p = 'groq';
+            localStorage.setItem('llm_provider', p);
+        }
+        return p;
+    })(),
+    model: (() => {
+        let m = localStorage.getItem('llm_model') || '';
+        if (m.includes('gemini-3') || m === 'gemini-1.5-flash') {
+            m = 'gemini-2.5-flash';
+            localStorage.setItem('llm_model', m);
+        } else if (m.includes('nemotron')) {
+            m = 'groq/openai/gpt-oss-120b';
+            localStorage.setItem('llm_model', m);
+        }
+        return m;
+    })(),
     baseUrl: localStorage.getItem('llm_base_url') || '',
     activeSessionId: null,
     sessionData: null,
@@ -212,7 +230,7 @@ function updateApiStatus() {
     const statusText = els.apiStatus.querySelector('.status-text');
     const indicator = els.apiStatus.querySelector('.status-indicator');
 
-    let label = 'Default (NVIDIA)';
+    let label = 'Default (Groq)';
     if (appState.provider) {
         label = appState.provider.toUpperCase();
         if (appState.model) {
@@ -238,10 +256,10 @@ function updateApiStatus() {
 }
 
 const providerDefaults = {
-    'gemini': { model: 'gemini-3.8-flash', placeholder: 'e.g. gemini-3.8-flash' },
+    'gemini': { model: 'gemini-2.5-flash', placeholder: 'e.g. gemini-2.5-flash, gemini-1.5-flash' },
     'openai': { model: 'gpt-4o-mini', placeholder: 'e.g. gpt-4o-mini' },
     'anthropic': { model: 'claude-3-5-haiku-20241022', placeholder: 'e.g. claude-3-5-haiku-20241022' },
-    'nvidia': { model: 'z-ai/glm-5.2', placeholder: 'e.g. z-ai/glm-5.2' },
+    'nvidia': { model: 'nvidia/llama-3.1-nemotron-70b-instruct', placeholder: 'e.g. nvidia/llama-3.1-nemotron-70b-instruct' },
     'groq': { model: 'groq/openai/gpt-oss-120b', placeholder: 'e.g. groq/openai/gpt-oss-120b' },
     'openrouter': { model: 'openrouter/auto', placeholder: 'e.g. openrouter/auto' },
     'ollama': { model: 'ollama/llama3', placeholder: 'e.g. ollama/llama3' }
@@ -940,10 +958,12 @@ function renderLoadedSessionUI() {
         
         // PDF configuration
         if (s.pdf_filename) {
-            els.generatePdfBtn.classList.add('hidden');
+            els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Recompile PDF Report';
+            els.generatePdfBtn.classList.remove('hidden');
             els.downloadPdfLink.setAttribute('href', `/api/sessions/${s.session_id}/download_pdf`);
             els.downloadPdfLink.classList.remove('hidden');
         } else {
+            els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-gears"></i> Compile PDF Report';
             els.generatePdfBtn.classList.remove('hidden');
             els.downloadPdfLink.classList.add('hidden');
         }
@@ -1570,11 +1590,23 @@ function renderTablePreview(previewRows) {
                 const newVal = td.textContent.trim();
                 if (appState.activeSessionId) {
                     try {
-                        await fetch(`/api/sessions/${appState.activeSessionId}/update_cell`, {
+                        const cellRes = await fetch(`/api/sessions/${appState.activeSessionId}/update_cell`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ row_index: rowIdx, column_name: h, new_value: newVal })
                         });
+                        const cellData = await cellRes.json();
+                        if (cellRes.ok && cellData.success) {
+                            if (cellData.download_url) {
+                                els.downloadBtn.setAttribute('href', cellData.download_url);
+                                els.downloadBtn.classList.remove('hidden');
+                            }
+                            if (cellData.pdf_invalidated) {
+                                els.downloadPdfLink.classList.add('hidden');
+                                els.generatePdfBtn.classList.remove('hidden');
+                                els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Recompile PDF Report (Data Updated)';
+                            }
+                        }
                     } catch (err) {
                         console.error('Cell update failed:', err);
                     }
@@ -1740,6 +1772,10 @@ function renderCharts(chartsData) {
         grid.appendChild(card);
         
         try {
+            if (typeof Chart === 'undefined') {
+                console.warn('Chart.js library is not yet loaded.');
+                return;
+            }
             const ctx = document.getElementById(canvasId).getContext('2d');
             let config = {};
             const chartBaseOptions = {
@@ -1762,11 +1798,13 @@ function renderCharts(chartsData) {
             };
             const axisOptions = {
                 x: {
+                    title: { display: !!chart.x_axis, text: chart.x_axis, color: '#b2bece', font: { family: 'Plus Jakarta Sans', size: 12, weight: '500' } },
                     grid: { display: false },
                     border: { display: false },
-                    ticks: { color: '#c0cad7', font: { family: 'Plus Jakarta Sans', size: 11 }, maxRotation: 0 }
+                    ticks: { color: '#c0cad7', font: { family: 'Plus Jakarta Sans', size: 11 }, maxRotation: 45, maxTicksLimit: 12, autoSkip: true }
                 },
                 y: {
+                    title: { display: !!chart.y_axis, text: chart.y_axis, color: '#b2bece', font: { family: 'Plus Jakarta Sans', size: 12, weight: '500' } },
                     beginAtZero: true,
                     grid: { color: 'rgba(210, 222, 236, 0.12)', drawTicks: false },
                     border: { display: false },
@@ -1901,7 +1939,7 @@ async function sendChatUserMessage() {
     // Show user bubble immediately
     appendChatBubbleUI('user', text, true);
 
-    // Create a streaming AI bubble with a blinking cursor
+    // Create a streaming AI bubble with live thinking indicator
     const aiBubble = document.createElement('div');
     aiBubble.className = 'chat-message assistant streaming';
     const aiMeta = document.createElement('span');
@@ -1909,7 +1947,7 @@ async function sendChatUserMessage() {
     aiMeta.textContent = 'AI Assistant';
     const aiBody = document.createElement('div');
     aiBody.className = 'stream-body';
-    aiBody.innerHTML = '<span class="typing-cursor">▋</span>';
+    aiBody.innerHTML = '<span class="status-hint" style="color:var(--text-muted);font-size:0.85rem;"><i class="fa-solid fa-circle-notch fa-spin"></i> Processing request...</span>';
     aiBubble.appendChild(aiMeta);
     aiBubble.appendChild(aiBody);
     els.chatMessages.appendChild(aiBubble);
@@ -2036,8 +2074,9 @@ async function compilePdfDiagnosticsReport() {
     if (!appState.activeSessionId) return;
     
     els.generatePdfBtn.disabled = true;
-    els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Compiling PDF...';
+    els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Initializing PDF compilation...';
     
+    let isSuccess = false;
     try {
         const response = await fetch(`/api/sessions/${appState.activeSessionId}/pdf`, {
             method: 'POST',
@@ -2050,10 +2089,49 @@ async function compilePdfDiagnosticsReport() {
             throw new Error(data.error || 'PDF compilation failed');
         }
         
+        let pdfUrl = data.pdf_url;
+        
+        // Handle asynchronous background job (HTTP 202)
+        if (data.job_id) {
+            const jobId = data.job_id;
+            const startTime = Date.now();
+            const maxTimeoutMs = 120000; // 2 minutes
+            
+            while (Date.now() - startTime < maxTimeoutMs) {
+                await new Promise(r => setTimeout(r, 1200));
+                
+                const jobResp = await fetch(`/api/jobs/${jobId}`);
+                if (!jobResp.ok) {
+                    if (jobResp.status === 404) {
+                        throw new Error('Background PDF job expired or not found.');
+                    }
+                    continue;
+                }
+                
+                const job = await jobResp.json();
+                if (job.status === 'done') {
+                    pdfUrl = (job.result && job.result.pdf_url) || `/api/sessions/${appState.activeSessionId}/download_pdf`;
+                    break;
+                } else if (job.status === 'failed') {
+                    throw new Error(job.error || 'PDF compilation failed during processing.');
+                } else {
+                    const msg = job.progress_msg || (job.status === 'running' ? 'Rendering charts & compiling PDF...' : 'Queued for compilation...');
+                    els.generatePdfBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${msg}`;
+                }
+            }
+            
+            if (!pdfUrl) {
+                throw new Error('PDF compilation timed out. Please try again.');
+            }
+        }
+        
         // Update Export Card UI
-        els.generatePdfBtn.classList.add('hidden');
-        els.downloadPdfLink.setAttribute('href', data.pdf_url);
+        els.downloadPdfLink.setAttribute('href', pdfUrl || `/api/sessions/${appState.activeSessionId}/download_pdf`);
         els.downloadPdfLink.classList.remove('hidden');
+        els.generatePdfBtn.disabled = false;
+        els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Recompile PDF Report';
+        els.generatePdfBtn.classList.remove('hidden');
+        isSuccess = true;
         
         // Reload active session details to draw the downloaded PDF chat bubble confirmations
         await selectSession(appState.activeSessionId);
@@ -2062,10 +2140,13 @@ async function compilePdfDiagnosticsReport() {
         console.error(err);
         alert(err.message);
     } finally {
-        els.generatePdfBtn.disabled = false;
-        els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-gears"></i> Compile PDF Report';
+        if (!isSuccess) {
+            els.generatePdfBtn.disabled = false;
+            els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-gears"></i> Compile PDF Report';
+        }
     }
 }
+
 
 function initSidebarHistory() {
     // Styling/scrolling helpers
@@ -2305,8 +2386,8 @@ function initPowerBIBuilder() {
                             }
                         },
                         scales: isCircular ? {} : {
-                            x: { beginAtZero: isHorizontal, ticks: { color: '#c0cad7' }, grid: { display: isHorizontal, color: 'rgba(210, 222, 236, 0.12)' } },
-                            y: { beginAtZero: !isHorizontal, ticks: { color: '#b2bece' }, grid: { display: !isHorizontal, color: 'rgba(210, 222, 236, 0.12)' } }
+                            x: { title: { display: true, text: chartData.x_axis, color: '#b2bece', font: { family: 'Plus Jakarta Sans', size: 12, weight: '500' } }, beginAtZero: isHorizontal, ticks: { color: '#c0cad7', maxRotation: 45, maxTicksLimit: 12, autoSkip: true }, grid: { display: isHorizontal, color: 'rgba(210, 222, 236, 0.12)' } },
+                            y: { title: { display: true, text: chartData.y_axis, color: '#b2bece', font: { family: 'Plus Jakarta Sans', size: 12, weight: '500' } }, beginAtZero: !isHorizontal, ticks: { color: '#b2bece' }, grid: { display: !isHorizontal, color: 'rgba(210, 222, 236, 0.12)' } }
                         }
                     }
                 };
@@ -2314,6 +2395,9 @@ function initPowerBIBuilder() {
                     config.data.datasets[0].label = `${chartData.y_axis} vs ${chartData.x_axis}`;
                     config.options.scales.x = { title: { display: true, text: chartData.x_axis, color: '#b2bece' }, ticks: { color: '#c0cad7' } };
                     config.options.scales.y.title = { display: true, text: chartData.y_axis, color: '#b2bece' };
+                }
+                if (typeof Chart === 'undefined') {
+                    throw new Error("Chart.js visualization engine is still loading or blocked. Please refresh the page (Ctrl+F5).");
                 }
                 appState.chartInstances.push(new Chart(chartCanvas.getContext('2d'), config));
             } else if (data.chart.type === 'image') {
@@ -2330,16 +2414,38 @@ function initPowerBIBuilder() {
 
             // Bind Pin to Report Button
             if (pinBtn) {
-                const chartPayload = {
-                    title: titleText,
-                    chart_type: params.chart_type,
-                    x_axis: params.x_col,
-                    y_axis: params.y_col,
-                    description: `Custom visual generated for ${titleText}`
-                };
-
                 pinBtn.addEventListener('click', async () => {
                     try {
+                        let imageBase64 = null;
+                        if (data.chart && data.chart.type === 'image' && data.chart.data) {
+                            imageBase64 = data.chart.data;
+                        } else {
+                            const activeCanvas = contentDiv.querySelector('canvas');
+                            if (activeCanvas) {
+                                try {
+                                    const dataUrl = activeCanvas.toDataURL('image/png');
+                                    if (dataUrl && dataUrl.includes(',')) {
+                                        imageBase64 = dataUrl.split(',')[1];
+                                    }
+                                } catch (canvasErr) {
+                                    console.warn('Could not extract canvas image:', canvasErr);
+                                }
+                            }
+                        }
+
+                        const chartPayload = {
+                            title: titleText,
+                            chart_category: params.chart_category,
+                            chart_type: params.chart_type,
+                            x_axis: params.x_col,
+                            y_axis: params.y_col,
+                            y_col_2: params.y_col_2,
+                            group_col: params.group_col,
+                            filters: params.filters || {},
+                            description: `Custom visual generated for ${titleText}`,
+                            image_base64: imageBase64
+                        };
+
                         const pinRes = await fetch(`/api/sessions/${appState.activeSessionId}/pin_chart`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -2358,6 +2464,12 @@ function initPowerBIBuilder() {
                             pinBtn.classList.remove('is-pinned');
                             pinBtn.innerHTML = '<i class="fa-solid fa-thumbtack"></i> <span>Add to report</span>';
                         }
+
+                        // Mark PDF report for recompilation so new visual is included
+                        els.downloadPdfLink.classList.add('hidden');
+                        els.generatePdfBtn.classList.remove('hidden');
+                        els.generatePdfBtn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Recompile PDF Report (Visual Added)';
+
                     } catch (pinErr) {
                         alert(pinErr.message);
                     }

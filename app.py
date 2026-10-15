@@ -3,6 +3,14 @@ import logging
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 import config
+# Backward compatibility shim for Matplotlib 3.9+ removal of cm.get_cmap
+try:
+    import matplotlib
+    import matplotlib.cm as _cm
+    if not hasattr(_cm, 'get_cmap'):
+        _cm.get_cmap = lambda name=None, lut=None: matplotlib.colormaps[name or 'viridis']
+except Exception:
+    pass
 from utils.fonts import download_lora_fonts
 from utils.logging_filter import APIKeyRedactionFilter
 
@@ -102,12 +110,12 @@ def set_security_headers(response):
     response.headers['Referrer-Policy'] = 'same-origin'
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
-        "script-src 'self' https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
-        "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
-        "img-src 'self' data: blob:; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://code.jquery.com https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://netdna.bootstrapcdn.com; "
+        "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com https://netdna.bootstrapcdn.com; "
+        "img-src 'self' data: blob: https://*.tile.openstreetmap.org; "
         "connect-src 'self' https://cdn.jsdelivr.net; "
-        "frame-src 'self' data:;"
+        "frame-src 'self' data: blob:;"
     )
     return response
 

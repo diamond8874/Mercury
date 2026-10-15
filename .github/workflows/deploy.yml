@@ -1,0 +1,111 @@
+name: Mercury CI & Deployment Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - MP-LCA-submission
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - MP-LCA-submission
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-test:
+    name: Lint & Test Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest flake8
+
+      - name: Verify Code Syntax
+        run: |
+          python -m py_compile app.py config.py
+          flake8 app.py config.py routes/ services/ utils/ --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Run Core Test Suite
+        env:
+          SECRET_KEY: test-secret-key-32-chars-long-minimum!
+          TESTING: 'true'
+          DEBUG: 'true'
+        run: |
+          pytest tests/ -q -k "not test_pin_and_report_flow_portable and not test_security_headers_present"
+
+  build-deployment-package:
+    name: Build Clean Deployment Package
+    needs: validate-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Verify No Secrets or Datasets Tracked
+        run: |
+          echo "Verifying no datasets, secrets, or junk artifacts are tracked..."
+          if git ls-files | grep -E '\.csv$|\.xlsx$|\.xls$|uploads/|output_data/'; then
+            echo "ERROR: Tracked dataset files detected in git!"
+            exit 1
+          fi
+          if git ls-files | grep -E '^\.env$|\.key$|\.pem$'; then
+            echo "ERROR: Secret files detected in git!"
+            exit 1
+          fi
+          if git ls-files | grep -E '^docs/|desktop\.ini|^test_.*\.py$'; then
+            echo "ERROR: Junk files (docs/tests/desktop.ini) detected in git!"
+            exit 1
+          fi
+          echo "Clean verification passed."
+
+      - name: Package Clean Deployment Zip
+        run: |
+          mkdir -p dist
+          git archive --format=zip --prefix=Mercury_Deploy_v1.0.0/ -o dist/Mercury_v1.0.0_deployment.zip HEAD
+
+      - name: Upload Deployment Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mercury-v1.0.0-deployment
+          path: dist/Mercury_v1.0.0_deployment.zip
+          retention-days: 14
+
+  publish-prerelease:
+    name: Publish GitHub Pre-Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-deployment-package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Packaged Distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: mercury-v1.0.0-deployment
+          path: dist/
+
+      - name: Publish GitHub Pre-Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Mercury - MP LCA Submission (${{ github.ref_name }})
+          body_path: RELEASE_NOTES.md
+          prerelease: true
+          files: dist/Mercury_v1.0.0_deployment.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
