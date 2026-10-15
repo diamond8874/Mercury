@@ -3,14 +3,14 @@ name: Mercury CI & Deployment Pipeline
 on:
   push:
     branches:
+      - cleanup-and-release-v1.0.0
       - main
-      - MP-LCA-submission
     tags:
       - 'v*'
   pull_request:
     branches:
+      - cleanup-and-release-v1.0.0
       - main
-      - MP-LCA-submission
 
 permissions:
   contents: write
