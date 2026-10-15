@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.1] - 2026-10-15
+
+### Fixed
+- Invalid rounding precision is rejected through the normal cleaning-plan warning path instead of raising an uncaught conversion error. Valid rounding precision retains its existing behaviour.
+
+### Changed
+- Release archives derive their internal version label from the Git tag; version tags publish stable releases. The cleanup branch receives the same CI validation as main.
+
+### Tests
+- Added isolated parser and engine regression checks for malformed precision, valid precision, missing values and input preservation.
+
 - **2026-10-14 — Repository Hygiene, Test & Docs Sanitization, and v1.0.0 Release Packaging (`.gitignore`, `.github/workflows/deploy.yml`, `tests/`)**:
   - Removed obsolete loose test scripts from repository root (`test_chat.py`, `test_human_transforms.py`, `test_llm_json.py`, `test_pin_report.py`, `test_value_mapping.py`, `test_visual.py`, `test_viz_ai.py`, `generate_tests.py`, `generate_test_data.py`) and removed OS artifact `desktop.ini`.
   - Consolidated and verified official pytest test suite strictly under `tests/`.

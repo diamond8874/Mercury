@@ -1,5 +1,11 @@
 # Knowledge Graph - Mercury Multi-Provider LLM Abstraction
 
+## v1.0.1 validation and release update (2026-10-15)
+
+`services/cleaning/schema.py::parse_typed_operation` now normalizes rounding decimals inside the existing validation exception boundary. Invalid string, null, container and infinite values return `None` rather than escaping to callers. `services/cleaning/engine.py::run_cleaning_engine` retains its existing warning/skip behaviour for rejected operations. `tests/test_typed_rounding_validation.py::TypedRoundingValidationTests` covers malformed flat/nested parameters, valid zero/positive/negative precision, engine preservation and successful rounding without booting Flask.
+
+`.github/workflows/deploy.yml` validates the cleanup branch as well as main, builds a tag-labelled archive with a stable artifact filename, and publishes a stable release for version tags. Academic reports and local release backups remain excluded by the existing `docs/` ignore rule.
+
 This file serves as a lightweight structural index of the repository to minimize token consumption during context loading. It defines the current architecture, data flow, modules, and environment matrices for the multi-provider LLM system.
 
 ---

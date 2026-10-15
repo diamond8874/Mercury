@@ -397,10 +397,9 @@ def parse_typed_operation(op_data: dict, default_column: Optional[str] = None) -
     # Normalize some keys
     if "dtype" in kwargs and "target_type" not in kwargs:
         kwargs["target_type"] = kwargs["dtype"]
-    if "decimals" in kwargs and cls is RoundNumericOp:
-        kwargs["decimals"] = int(kwargs["decimals"])
-
     try:
+        if "decimals" in kwargs and cls is RoundNumericOp:
+            kwargs["decimals"] = int(kwargs["decimals"])
         return cls.model_validate(kwargs)
     except Exception:
         return None

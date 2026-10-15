@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - MP-LCA-submission
+      - cleanup-and-release-v1.0.0
     tags:
       - 'v*'
   pull_request:
@@ -76,17 +77,19 @@ jobs:
       - name: Package Clean Deployment Zip
         run: |
           mkdir -p dist
-          git archive --format=zip --prefix=Mercury_Deploy_v1.0.0/ -o dist/Mercury_v1.0.0_deployment.zip HEAD
+          version=snapshot
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then version="$GITHUB_REF_NAME"; fi
+          git archive --format=zip --prefix="Mercury_${version}/" -o dist/Mercury_deployment.zip HEAD
 
       - name: Upload Deployment Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mercury-v1.0.0-deployment
-          path: dist/Mercury_v1.0.0_deployment.zip
+          name: mercury-deployment
+          path: dist/Mercury_deployment.zip
           retention-days: 14
 
-  publish-prerelease:
-    name: Publish GitHub Pre-Release
+  publish-release:
+    name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build-deployment-package
     runs-on: ubuntu-latest
@@ -97,15 +100,15 @@ jobs:
       - name: Download Packaged Distribution
         uses: actions/download-artifact@v4
         with:
-          name: mercury-v1.0.0-deployment
+          name: mercury-deployment
           path: dist/
 
-      - name: Publish GitHub Pre-Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Mercury - MP LCA Submission (${{ github.ref_name }})
+          name: Mercury ${{ github.ref_name }}
           body_path: RELEASE_NOTES.md
-          prerelease: true
-          files: dist/Mercury_v1.0.0_deployment.zip
+          prerelease: false
+          files: dist/Mercury_deployment.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
