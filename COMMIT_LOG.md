@@ -1,5 +1,9 @@
 # Agent Commit Log
 
+| 2026-10-15 | Codex | Remove unnecessary Actions artifact transfer | `.github/workflows/deploy.yml`, `KNOWLEDGE_GRAPH.md`, `CHANGELOG.md`, `COMMIT_LOG.md` | CI tests succeeded but upload-artifact failed on account storage quota. Publish the existing ZIP conditionally from its build job; removed upload/download steps and the redundant publication job without deleting unrelated Actions data. |
+
+| 2026-10-15 | Codex | Retire legacy submission deployment triggers | `.github/workflows/deploy.yml`, `KNOWLEDGE_GRAPH.md`, `CHANGELOG.md`, `COMMIT_LOG.md` | Verified upstream/MP-LCA-submission is an ancestor of the cleanup branch; removed its push/pull-request workflow triggers while retaining the Git branch and history. |
+
 | 2026-10-15 | Codex | Preserve upstream cleanup history | `.github/workflows/deploy.yml`, `COMMIT_LOG.md` | Merged the upstream cleanup branch's separate CI-trigger commits; retained validation for cleanup branch pushes and pull requests alongside main, and retained tag-derived stable release packaging. |
 
 | 2026-10-15 | Codex | Fix rounding validation boundary and prepare v1.0.1 | `services/cleaning/schema.py`, `tests/test_typed_rounding_validation.py`, `.github/workflows/deploy.yml`, `RELEASE_NOTES.md`, `KNOWLEDGE_GRAPH.md`, `CHANGELOG.md`, `COMMIT_LOG.md` | Reproduced uncaught precision conversion, moved conversion into existing exception handling, verified parser/engine regressions, preserved upstream history by fast-forwarding cleanup branch, and made release packaging tag-derived with stable publication. Local academic artifacts remain ignored. |

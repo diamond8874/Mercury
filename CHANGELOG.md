@@ -6,6 +6,8 @@
 - Invalid rounding precision is rejected through the normal cleaning-plan warning path instead of raising an uncaught conversion error. Valid rounding precision retains its existing behaviour.
 
 ### Changed
+- Publish the deployment ZIP directly from its build job, avoiding temporary Actions artifact storage and its quota dependency.
+- Removed the fully incorporated `MP-LCA-submission` branch from deployment triggers; main and the current cleanup branch remain active.
 - Release archives derive their internal version label from the Git tag; version tags publish stable releases. The cleanup branch receives the same CI validation as main.
 
 ### Tests

@@ -4,14 +4,12 @@ on:
   push:
     branches:
       - main
-      - MP-LCA-submission
       - cleanup-and-release-v1.0.0
     tags:
       - 'v*'
   pull_request:
     branches:
       - main
-      - MP-LCA-submission
       - cleanup-and-release-v1.0.0
 
 permissions:
@@ -82,29 +80,8 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then version="$GITHUB_REF_NAME"; fi
           git archive --format=zip --prefix="Mercury_${version}/" -o dist/Mercury_deployment.zip HEAD
 
-      - name: Upload Deployment Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: mercury-deployment
-          path: dist/Mercury_deployment.zip
-          retention-days: 14
-
-  publish-release:
-    name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-deployment-package
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Download Packaged Distribution
-        uses: actions/download-artifact@v4
-        with:
-          name: mercury-deployment
-          path: dist/
-
       - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: Mercury ${{ github.ref_name }}
