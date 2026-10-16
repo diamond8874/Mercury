@@ -16,8 +16,8 @@ const appState = {
     })(),
     model: (() => {
         let m = localStorage.getItem('llm_model') || '';
-        if (m.includes('gemini-3') || m === 'gemini-1.5-flash') {
-            m = 'gemini-2.5-flash';
+        if (m.includes('gemini-3') || m.includes('gemini-2.5') || m === 'gemini-1.5-flash-latest') {
+            m = 'gemini-1.5-flash';
             localStorage.setItem('llm_model', m);
         } else if (m.includes('nemotron')) {
             m = 'groq/openai/gpt-oss-120b';
@@ -256,7 +256,7 @@ function updateApiStatus() {
 }
 
 const providerDefaults = {
-    'gemini': { model: 'gemini-2.5-flash', placeholder: 'e.g. gemini-2.5-flash, gemini-1.5-flash' },
+    'gemini': { model: 'gemini-1.5-flash', placeholder: 'e.g. gemini-1.5-flash, gemini-2.0-flash' },
     'openai': { model: 'gpt-4o-mini', placeholder: 'e.g. gpt-4o-mini' },
     'anthropic': { model: 'claude-3-5-haiku-20241022', placeholder: 'e.g. claude-3-5-haiku-20241022' },
     'nvidia': { model: 'nvidia/llama-3.1-nemotron-70b-instruct', placeholder: 'e.g. nvidia/llama-3.1-nemotron-70b-instruct' },

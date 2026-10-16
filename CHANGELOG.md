@@ -1,10 +1,8 @@
 # Changelog
 
-- **Deployment Pre-Release v1.0.0, Dataset Sanitization & GitHub Actions Workflow (`.gitignore`, `.github/workflows/deploy.yml`, `RELEASE_NOTES.md`)**:
-  - Strictly untracked and excluded all dataset files (`*.csv`, `*.xlsx`, `*.xls`, `test_dirty_data.xlsx`, `uploads/`, `output_data/`).
-  - Enforced secret isolation keeping exclusively sample `.env.example` while ignoring all live environment files.
-  - Implemented GitHub Actions CI/CD deployment workflow (`.github/workflows/deploy.yml`) for automated linting, testing, clean packaging, and pre-release publishing on tag `v1.0.0`.
-  - Created standalone clean deployment directory structure and release artifact `Mercury_v1.0.0_deployment.zip`.
+- **Fix Google Gemini Model Identifier 404 & Heuristic Typo Tolerance (`services/ai_service.py`, `services/chat_service.py`, `services/cleaning/intent_parser.py`, `static/app.js`, `static/app.html`)**:
+  - Replaced non-existent `gemini-2.5-flash` model identifier with official Google AI Studio model `gemini-1.5-flash` across defaults, resolution mappings, and localStorage auto-healer, completely eliminating 404 Model Not Found errors on valid Gemini API keys.
+  - Added typo normalization (`transfrom` $\to$ `transform`) in `intent_parser.py` and chat regex matcher in `chat_service.py` to ensure local parsing correctly executes column transformations even with common keyboard slips.
 
 
 - **MP LCA Submission & Repository Hygiene (`.gitignore`, `static/about.*`, `static/chart.umd.min.js`)**:

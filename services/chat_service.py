@@ -91,7 +91,7 @@ def run_local_fallback(msg_lower: str, current_session: dict) -> Dict[str, Any]:
                 schema_updates[col] = {"action": "drop", "reason": "Dropped by user request in chat.", "transformation": None}
             elif any(kw in msg_lower for kw in ["keep", "add", "retain", "include"]):
                 schema_updates[col] = {"action": "keep", "reason": "Kept by user request in chat.", "transformation": None}
-            elif re.search(r'\b(?:transform|convert|encode|impute|round|whole\s+number|integer|change|replace|map|set|sort)\b', msg_lower):
+            elif re.search(r'\b(?:transform|transfrom|convert|encode|impute|round|whole\s+number|integer|change|replace|map|set|sort|into)\b', msg_lower):
                 schema_updates[col] = {"action": "transform", "reason": "Transform requested in chat.", "transformation": msg_lower}
     return schema_updates
 
@@ -382,7 +382,7 @@ If no changes are needed, return empty schema_updates {{}}.
             prov = (provider or "").lower()
             is_gemini = "gemini" in prov or (model and "gemini" in model.lower())
             if is_gemini and not full_raw:
-                alt_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
+                alt_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp", "gemini-1.5-pro"]
                 retried = False
                 for alt_m in alt_models:
                     if alt_m in (model or "").lower():

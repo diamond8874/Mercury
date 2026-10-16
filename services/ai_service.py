@@ -110,7 +110,7 @@ class UnifiedLLMClient:
             elif prov == "groq":
                 model_name = "groq/openai/gpt-oss-120b"
             elif prov in ["gemini", "google"]:
-                model_name = "gemini/gemini-2.5-flash"
+                model_name = "gemini/gemini-1.5-flash"
             elif prov == "openai":
                 model_name = "gpt-4o-mini"
             elif prov == "anthropic":
@@ -126,7 +126,7 @@ class UnifiedLLMClient:
                 if env_p == "groq" and os.environ.get("GROQ_API_KEY"):
                     model_name = os.environ.get("LLM_MODEL") or "groq/openai/gpt-oss-120b"
                 elif env_p in ["gemini", "google"] and (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
-                    model_name = os.environ.get("LLM_MODEL") or "gemini/gemini-2.5-flash"
+                    model_name = os.environ.get("LLM_MODEL") or "gemini/gemini-1.5-flash"
                 elif env_p == "openai" and os.environ.get("OPENAI_API_KEY"):
                     model_name = os.environ.get("LLM_MODEL") or "gpt-4o-mini"
                 elif env_p == "anthropic" and os.environ.get("ANTHROPIC_API_KEY"):
@@ -138,7 +138,7 @@ class UnifiedLLMClient:
             elif os.environ.get("GROQ_API_KEY"):
                 model_name = "groq/openai/gpt-oss-120b"
             elif os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
-                model_name = "gemini/gemini-2.5-flash"
+                model_name = "gemini/gemini-1.5-flash"
             elif os.environ.get("OPENAI_API_KEY"):
                 model_name = "gpt-4o-mini"
             elif os.environ.get("ANTHROPIC_API_KEY"):
@@ -257,11 +257,16 @@ class UnifiedLLMClient:
             if not api_key:
                 api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             clean_model = model_name.split("/", 1)[1] if "/" in model_name else model_name
-            # Map experimental, invalid or legacy model tags to current stable Google AI Studio models
-            if "gpt-oss" in clean_model or "glm" in clean_model or "gemini-3" in clean_model or not clean_model:
-                clean_model = "gemini-2.5-flash"
-            elif clean_model == "gemini-1.5-flash":
-                clean_model = "gemini-1.5-flash-latest"
+            # Map experimental, invalid, typo or legacy model tags to valid Google AI Studio models
+            clean_lower = clean_model.lower()
+            if "2.5" in clean_lower or "gemini-3" in clean_lower or "gpt-oss" in clean_lower or "glm" in clean_lower or not clean_model:
+                clean_model = "gemini-1.5-flash"
+            elif "2.0-flash" in clean_lower:
+                clean_model = "gemini-2.0-flash-exp"
+            elif "1.5-pro" in clean_lower:
+                clean_model = "gemini-1.5-pro"
+            else:
+                clean_model = "gemini-1.5-flash"
             model_name = f"gemini/{clean_model}"
 
         elif provider == "openrouter":

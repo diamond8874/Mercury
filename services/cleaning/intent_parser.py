@@ -45,8 +45,10 @@ from services.cleaning.operation_registry import (
 # ── Typo / slang correction map ───────────────────────────────────────────────
 _TYPO_MAP = {
     r'\btranform\b': 'transform',
+    r'\btransfrom\b': 'transform',
     r'\bperfrom\b': 'perform',
     r'\btranformation\b': 'transformation',
+    r'\btransfromation\b': 'transformation',
     r'\bcolum\b': 'column',
     r'\bcolums\b': 'columns',
     r'\breove\b': 'remove',
